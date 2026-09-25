@@ -775,25 +775,25 @@ svg {
 }
 .watch-mode .workspace {
   padding: 3px;
-  flex: 1;
-  display: flex;
+  flex: 1 1 0;
   min-height: 0;
+  overflow: auto;
 }
 .watch-mode .player-grid {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
   width: 100%;
   gap: 3px;
-  align-items: stretch;
-  align-content: stretch;
-  flex: 1;
+  align-items: flex-start;
+  align-content: flex-start;
 }
 .watch-mode .player-tile {
-  display: flex;
-  flex-direction: column;
+  flex: 0 0 min(100%, var(--watch-player-width, 100%));
   border-radius: 0;
 }
 .watch-mode .player-frame {
-  flex: 1;
-  aspect-ratio: auto;
+  aspect-ratio: 16/9;
   min-height: 300px;
 }
 .watch-mode .timeline {
@@ -1039,15 +1039,6 @@ dialog::backdrop {
   .lookup-errors strong {
     max-width: 100%;
   }
-  .watch-mode .workspace {
-    display: block;
-  }
-  .watch-mode .player-grid {
-    display: grid;
-  }
-  .watch-mode .player-frame {
-    aspect-ratio: 16/9;
-  }
   .empty-state {
     padding: 40px 15px;
   }
@@ -1070,7 +1061,7 @@ dialog::backdrop {
   flex: 0;
 }
 .watch-mode .workspace:not(.empty) {
-  flex: 1;
+  flex: 1 1 0;
 }
 @media (max-width: 700px) {
   .add-bar textarea {

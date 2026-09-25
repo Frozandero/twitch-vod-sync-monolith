@@ -49,6 +49,7 @@ import type { PlaybackSnapshot, StopReason } from './playback';
 import { seekBarrier } from './seekBarrier';
 import { anyPlaying, startDecision, startProgress } from './playbackStart';
 import { readStorage, writeStorage } from './storage';
+import { useWatchLayout } from './useWatchLayout';
 
 const SESSION_KEY = 'vodsync.session.v1'; // Preserve and migrate existing workspaces.
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : 'Please retry.');
@@ -136,6 +137,7 @@ export default function App() {
   const [orderAnnouncement, setOrderAnnouncement] = useState('');
   const [removed, setRemoved] = useState<{ vod: Vod; index: number; moment: number }>();
   const [watchMode, setWatchMode] = useState(false);
+  const workspace = useWatchLayout(watchMode, vods.length);
   const [auth, setAuth] = useState<TwitchAuth>();
   const [clientId, setClientId] = useState(
     configuredClientId || readStorage('vodsync.clientId') || '',
@@ -722,7 +724,7 @@ export default function App() {
           </button>
         </div>
       )}
-      <main className={`workspace ${!vods.length ? 'empty' : ''}`}>
+      <main ref={workspace} className={`workspace ${!vods.length ? 'empty' : ''}`}>
         {!vods.length ? (
           <div className="empty-state">
             <h1>Add Twitch recordings</h1>
