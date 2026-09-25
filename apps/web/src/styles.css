@@ -1058,3 +1058,34 @@ dialog::backdrop {
     height: 52px;
   }
 }
+
+.provider-label {
+  color: var(--muted);
+  font-size: 11px;
+}
+.external-recording {
+  min-height: 300px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 12px;
+  padding: 24px;
+  text-align: center;
+}
+.external-recording > strong {
+  max-width: 42ch;
+  overflow-wrap: anywhere;
+}
+.external-recording > time {
+  font-family: monospace;
+  font-size: 24px;
+}
+.external-recording > p {
+  margin: 0;
+}
+.external-recording > small {
+  color: var(--muted);
+  max-width: 36ch;
+}

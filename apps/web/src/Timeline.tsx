@@ -10,6 +10,7 @@ import {
   type Vod,
 } from '@vodsync/core';
 import { alignment, type PlaybackSnapshot } from './playback';
+import { supportsPlayback } from './capabilities';
 
 const clock = (ms: number) => new Date(ms).toISOString().slice(11, 19);
 export function TimelineToggle({
@@ -93,13 +94,20 @@ export function Timeline({
                     : 'Play matching players'
               }
               onClick={onPlayback}
+              disabled={
+                !playing &&
+                !preparing &&
+                !vods.some(
+                  (vod) => supportsPlayback(vod) && matchMoment(vod, moment).state === 'playing',
+                )
+              }
             >
               {playing ? <Pause size={16} /> : <Play size={16} />}
             </button>
             <time>
               {new Date(shown).toISOString().slice(0, 10)} <strong>{clock(shown)}</strong> UTC
             </time>
-            <span>Drag to seek all recordings</span>
+            <span>Drag to select a moment</span>
           </>
         )}
       </div>

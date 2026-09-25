@@ -4,11 +4,11 @@ Research date: **2026-09-25**. Capability claims below distinguish official docu
 
 ## Current scope
 
-The owner subsequently deferred Kick, removed manual metadata entry, and replaced the separate Links view with timestamp links in the timeline. The release is Twitch-only with a compact grid, per-player controls and links, watch mode, and a collapsible shared seeker. Kick findings below are retained as research, not a claim of shipped support.
+The owner removed manual metadata entry and the separate Links view, then requested Kick support on 2026-09-25. The release includes Twitch playback plus Kick VOD/clip timestamp matching in the compact grid and shared timeline.
 
 ## Feasibility decision
 
-Both requested workflows are feasible on GitHub Pages **for Twitch**. A supported controllable Kick VOD embed was not found. The static app does not require an extension. No unrelated service or CORS proxy is used.
+Both requested workflows are feasible on GitHub Pages **for Twitch**. Kick VOD/clip timestamp matching is also feasible through its public-site metadata, with the limitations below. A supported controllable Kick VOD embed was not found. The static app does not require an extension. No unrelated service or CORS proxy is used.
 
 ## Twitch playback
 
@@ -42,15 +42,31 @@ The undocumented adapter is isolated so it can be removed if Twitch changes or d
 
 **Browser verified:** past broadcasts `2882012892` and `2882074717` resolved directly from the app. At `02:00:00` in the first, the second matched `00:46:07`; both official embedded players played at those positions. Clip `AbstruseEphemeralFishHumbleLife-jtmCU3snysCf8iSm?t=5` resolved to parent VOD `2877735401` at `09:47:17`, with all recordings retained in the links view.
 
-## Kick
+## Kick — observed 2026-09-25
 
-[Kick's embed help](https://help.kick.com/en/articles/8010826-how-to-embed-your-kick-livestream) describes **livestream** iframe embedding. It does not document a VOD seek/read-position JavaScript interface. The [public API documentation repository](https://github.com/KickEngineering/KickDevDocs) was inspected; its API directory did not include a public VOD metadata resource at research time. This absence is the basis for treating native VOD integration as unsupported, not proof that every internal player operation is impossible.
+[Kick's embed help](https://help.kick.com/en/articles/8010826-how-to-embed-your-kick-livestream) documents live-channel embedding. The currently served [official player](https://player.kick.com/aikobliss) application has channel and channel/offline routes; no VOD route or external seek/clock interface was found. The [official public API specification](https://api.kick.com/swagger/doc.json) has no VOD or clip metadata resource. These observations support shipping timestamp links, not controllable Kick VOD embeds. No custom HLS player, media proxy, credential extraction, or extension is included.
 
-The maintained [yt-dlp Kick extractor](https://github.com/yt-dlp/yt-dlp/blob/master/yt_dlp/extractor/kick.py) uses an internal `/api/v1/video/{uuid}` endpoint and converts livestream duration from milliseconds. That is implementation evidence, not a supported public API contract. Our adapter attempts a direct credential-free request and accepts only a completed VOD with an explicit `livestream.start_time` and positive duration. It never substitutes video upload time. Blocked requests, changed schema, missing start, or active livestreams require manual timing.
+Research used an agent-created Brave tab on public channel, VOD, clip, and Share interfaces. The user had disabled their player-changing extensions. App requests were separately verified from localhost with `credentials: omit`; successful logged-in navigation alone is not evidence of CORS support.
 
-**Observed:** a historical yt-dlp fixture VOD returned HTTP 404 during research, so it did not establish current Kick metadata or playback success. No fresh Kick account/VOD was supplied for an end-to-end playback check.
+### Two VOD identifiers
 
-Second-based `?t=` links are discussed in [Kick's own developer issue tracker](https://github.com/KickEngineering/KickDevDocs/issues/125), but are not treated here as a stable official VOD contract. The isolated core can format them; the web interface does not expose Kick support. A clean, extension-disabled Brave session reached Kick's logged-out homepage, but VOD experiments were stopped when the owner deferred Kick. This did not verify Kick metadata or seeking.
+The current [aikobliss VOD](https://kick.com/aikobliss/videos/01a0d4be-acc8-79a9-accb-14af04328c11) has a UUID different from the legacy service's UUID. Observed primary endpoints:
+
+- `/api/v2/channels/aikobliss/videos` on kick.com lists legacy UUID `01947dbf-73c9-487c-961a-00fcd6b9c5f4`.
+- `/api/v1/video/01947dbf-73c9-487c-961a-00fcd6b9c5f4` includes explicit `livestream.vod_id = 01a0d4be-acc8-79a9-accb-14af04328c11`, a broadcast start of `2026-09-24T18:47:41Z`, and duration 49,682,000 milliseconds.
+- `/api/v1/channels/76274/videos/01a0d4be-acc8-79a9-accb-14af04328c11` on web.kick.com returns the current ID, the same start, and duration 49,682 **seconds**. It did not allow an external Pages Origin via CORS.
+
+The older endpoints allowed credential-free requests from the local app. The adapter matches current URLs by inspecting the channel's older VOD records and comparing their explicit `vod_id`. It never infers identity from UUID timestamps, duration, upload date, or proximity. Lookup examines at most 50 recent records in batches of three and shares/caches normalized metadata for five minutes. An unindexed recording may still fail; the new-service fallback clearly reports its CORS limitation.
+
+Legacy VOD URLs may now return Kick's 404 UI despite metadata remaining available. Canonicalizing `vod_id` is essential for working outbound links and deduplicating current URLs, legacy URLs, and clip parents. Only completed public recordings with reliable start and positive duration are accepted. UTC SQL-style dates from the older service are normalized; explicit timezone offsets are respected. Media URLs and unrelated response fields never enter sessions.
+
+### Clips and timestamp links
+
+On the [recent clip page](https://kick.com/aikobliss/clips/clip_01M35VYB72DC0GQ7GXNYBEFKYA), **Watch full video** points to VOD `01a0cb24-ca08-7953-9e4a-ae201b03b8ef?t=9292`. The older `/api/v2/clips/clip_01M35VYB72DC0GQ7GXNYBEFKYA/play` endpoint returns parent legacy ID `302d2f04-d05c-4fdb-86b6-57d175bb03d7`, `vod_starts_at = 9292`, and duration 25 seconds. The parent metadata provides its current `vod_id`. A five-second clip-local timestamp maps to VOD offset 9297, without subtracting clip duration or using clip creation time.
+
+The newer clip service exposes `video.id` and `video.offset` but also lacks external-origin CORS. The shipped adapter uses the older service and rejects missing/deleted parents and invalid offsets. Both `/channel/clips/clip_…` and `/channel?clip=clip_…` inputs work. [Kick's clip help](https://help.kick.com/en/articles/7120566-how-to-create-clips-on-kick) confirms clips can originate from live streams or VODs; a clip's creation date cannot identify its original footage.
+
+Kick's Share dialog with **Start at** checked produced `?t=205`. The canonical clip-parent destination with `?t=9292` loaded the VOD and sought into the corresponding recording in Brave. Timestamp links use integer seconds. These are observed internal contracts, not a stable API guarantee. Player duration/content may differ from metadata owing to processing, ads, or interruptions; corrections remain available and link-only rows never claim verified playback alignment.
 
 ## GitHub Pages and repository choice
 

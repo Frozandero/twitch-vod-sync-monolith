@@ -1,5 +1,6 @@
 import { matchMoment, vodKey, type Vod } from '@vodsync/core';
 import type { PlaybackSnapshot } from './playback';
+import { supportsPlayback } from './capabilities';
 
 export type SeekState = 'seeking' | 'buffering' | 'ready';
 export type SeekProgress = { serial: number; state: SeekState };
@@ -53,7 +54,9 @@ export function seekBarrier(
   serial: number,
   snapshots: Record<string, PlaybackSnapshot>,
 ) {
-  const required = vods.filter((vod) => matchMoment(vod, moment).state === 'playing');
+  const required = vods.filter(
+    (vod) => supportsPlayback(vod) && matchMoment(vod, moment).state === 'playing',
+  );
   const waiting = required.filter((vod) => {
     const snapshot = snapshots[vodKey(vod)];
     return (

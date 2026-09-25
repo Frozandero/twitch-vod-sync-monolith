@@ -1,5 +1,6 @@
 import { matchMoment, vodKey, type Vod } from '@vodsync/core';
 import type { PlaybackSnapshot } from './playback';
+import { supportsPlayback } from './capabilities';
 
 export function startProgress(
   vods: Vod[],
@@ -7,7 +8,9 @@ export function startProgress(
   serial: number,
   snapshots: Record<string, PlaybackSnapshot>,
 ) {
-  const required = vods.filter((vod) => matchMoment(vod, moment).state === 'playing');
+  const required = vods.filter(
+    (vod) => supportsPlayback(vod) && matchMoment(vod, moment).state === 'playing',
+  );
   const waiting = required.filter((vod) => {
     const state = snapshots[vodKey(vod)];
     return !(
@@ -47,7 +50,10 @@ export function anyPlaying(
   return vods.some((vod) => {
     const state = snapshots[vodKey(vod)];
     return (
-      matchMoment(vod, moment).state === 'playing' && state?.status === 'ready' && !state.paused
+      supportsPlayback(vod) &&
+      matchMoment(vod, moment).state === 'playing' &&
+      state?.status === 'ready' &&
+      !state.paused
     );
   });
 }

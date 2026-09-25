@@ -20,6 +20,7 @@ import {
 import { createPlayerClock } from './playerClock';
 import { createVodGuard, type PlaybackSnapshot, type StopReason } from './playback';
 import { createSeekPreparation, seekPosition, type SeekState } from './seekBarrier';
+import { supportsPlayback } from './capabilities';
 
 export type PlayerHandle = {
   getSnapshot(): PlaybackSnapshot;
@@ -147,9 +148,12 @@ export function Player({
     [attempt, setAttempt] = useState(0);
   const key = vodKey(vod),
     demo = vod.provenance === 'demo';
+  const external = !supportsPlayback(vod);
   const match = matchMoment(vod, moment);
   const holding =
-    (command?.phase === 'preparing' || command?.phase === 'starting') && match.state === 'playing';
+    !external &&
+    (command?.phase === 'preparing' || command?.phase === 'starting') &&
+    match.state === 'playing';
   const canPlay = command?.phase === 'starting' || command?.phase === 'released';
   const holdLabel =
     command?.phase === 'starting'
@@ -163,7 +167,7 @@ export function Player({
       : stopped?.serial === command?.serial
         ? stopped?.reason
         : undefined;
-  const linkOffset = match && match.state !== 'playing' ? match.offsetSeconds : current;
+  const linkOffset = external || match.state !== 'playing' ? match.offsetSeconds : current;
   const commandRef = useRef(command);
   commandRef.current = command;
   const momentRef = useRef(moment);
@@ -173,6 +177,7 @@ export function Player({
   const vodRef = useRef(vod);
   vodRef.current = vod;
   useEffect(() => {
+    if (external) return;
     let alive = true,
       instance: TwitchPlayer | undefined,
       timer: ReturnType<typeof setTimeout> | undefined;
@@ -427,7 +432,7 @@ export function Player({
       snapshot.current = null;
       host?.replaceChildren();
     };
-  }, [key, demo, attempt, blockedStatus]);
+  }, [key, demo, external, attempt, blockedStatus]);
   useEffect(() => {
     const handle = player.current;
     if (!ready || !handle || !command || blockedStatus || command.phase === 'cancelled') return;
@@ -562,39 +567,44 @@ export function Player({
           <GripVertical size={15} />
         </button>
         <strong title={vod.title}>{vod.channel}</strong>
+        {external && <span className="provider-label">Kick</span>}
         {holding && !blockedStatus && (
           <span className="seek-hold" role="status" title={holdLabel} aria-label={holdLabel}>
             <LoaderCircle className="spin" size={14} />
           </span>
         )}
-        <time>{formatTime(current)}</time>
+        <time>{formatTime(external ? match.offsetSeconds : current)}</time>
         <div className="player-actions">
-          <button
-            className={`sync-button ${source ? 'selected' : ''}`}
-            disabled={!ready || !clockReady || holding}
-            onClick={() => onSync(vod)}
-            title={
-              clockReady
-                ? `Sync all players to ${vod.channel}`
-                : 'Press play inside Twitch to enable sync from this recording'
-            }
-          >
-            <RefreshCw size={13} />
-            <span>Sync</span>
-          </button>
-          <button
-            className="icon-button"
-            disabled={!ready || holding}
-            aria-label={`${muted ? 'Unmute' : 'Mute'} ${vod.channel}`}
-            onClick={() => {
-              player.current?.setMuted(!muted);
-              forceMuted.current = false;
-              setError('');
-              setMuted(!muted);
-            }}
-          >
-            {muted ? <VolumeX size={15} /> : <Volume2 size={15} />}
-          </button>
+          {!external && (
+            <>
+              <button
+                className={`sync-button ${source ? 'selected' : ''}`}
+                disabled={!ready || !clockReady || holding}
+                onClick={() => onSync(vod)}
+                title={
+                  clockReady
+                    ? `Sync all players to ${vod.channel}`
+                    : 'Press play inside Twitch to enable sync from this recording'
+                }
+              >
+                <RefreshCw size={13} />
+                <span>Sync</span>
+              </button>
+              <button
+                className="icon-button"
+                disabled={!ready || holding}
+                aria-label={`${muted ? 'Unmute' : 'Mute'} ${vod.channel}`}
+                onClick={() => {
+                  player.current?.setMuted(!muted);
+                  forceMuted.current = false;
+                  setError('');
+                  setMuted(!muted);
+                }}
+              >
+                {muted ? <VolumeX size={15} /> : <Volume2 size={15} />}
+              </button>
+            </>
+          )}
           <button
             className="icon-button"
             onClick={onSettings}
@@ -624,7 +634,23 @@ export function Player({
         </div>
       </div>
       <div className="player-frame">
-        {demo ? (
+        {external ? (
+          <div className="external-recording">
+            <strong>{vod.title}</strong>
+            <time>{formatTime(match.offsetSeconds)}</time>
+            <p>{matchDescription(match)}</p>
+            <a className="button" href={match.url} target="_blank" rel="noreferrer">
+              <ExternalLink size={15} />
+              {match.state === 'playing'
+                ? 'Open on Kick at this time'
+                : `Open Kick VOD ${match.state === 'before' ? 'start' : 'end'}`}
+            </a>
+            <button className="text-button" onClick={onSettings}>
+              Choose source timestamp
+            </button>
+            <small>Kick VODs open on Kick. Embedded playback is unavailable.</small>
+          </div>
+        ) : demo ? (
           <div className="demo-screen">
             <span>Simulated recording</span>
             <strong>{vod.channel}</strong>
@@ -641,7 +667,7 @@ export function Player({
         ) : (
           <div className="twitch-embed" ref={container} />
         )}
-        {blockedStatus && (
+        {!external && blockedStatus && (
           <div className="boundary-state">
             <strong>
               {blockedStatus === 'before'

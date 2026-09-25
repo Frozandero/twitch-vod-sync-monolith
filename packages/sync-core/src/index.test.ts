@@ -69,13 +69,27 @@ describe('input URLs', () => {
           .offsetSeconds,
       ).toBe(120);
   });
+  it.each(['https://kick.com/name/clips/clip_ABC?t=5', 'https://kick.com/name?clip=clip_ABC&t=5'])(
+    'parses Kick clips %s',
+    (url) => {
+      expect(parseMedia(url)).toMatchObject({
+        platform: 'kick',
+        kind: 'clip',
+        id: 'clip_ABC',
+        url: 'https://kick.com/name/clips/clip_ABC',
+        offsetSeconds: 5,
+      });
+    },
+  );
   it.each([
     'https://twitch.tv.evil.com/videos/123',
     'https://evil.com/?url=twitch.tv/videos/123',
     'https://twitch.tv@evil.com/videos/123',
     'javascript:alert(1)',
     'https://twitch.tv/channel',
-    'https://kick.com/name?clip=clip_123',
+    'https://kick.com.evil.com/name?clip=clip_123',
+    'https://kick.com/name?clip=invalid',
+    'https://kick.com/name/clips/clip_123/extra',
     'https://twitch.tv:3000/videos/123',
     'https://me:secret@twitch.tv/videos/123',
   ])('rejects unsupported / unsafe URLs', (input) => expect(() => parseMedia(input)).toThrow());

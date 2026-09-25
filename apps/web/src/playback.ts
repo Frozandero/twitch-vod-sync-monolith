@@ -1,5 +1,6 @@
 import { formatGap, matchMoment, type Vod } from '@vodsync/core';
 import type { SeekProgress } from './seekBarrier';
+import { supportsPlayback } from './capabilities';
 
 export type StopReason = 'ended' | 'changed';
 export type PlaybackSnapshot = {
@@ -63,6 +64,7 @@ export function alignment(vod: Vod, moment: number, playback?: PlaybackSnapshot)
   const match = matchMoment(vod, moment);
   if (match.state !== 'playing')
     return { state: match.state, label: match.state === 'before' ? 'Not started' : 'Finished' };
+  if (!supportsPlayback(vod)) return { state: 'external', label: 'Link only' };
   if (playback?.status === 'changed') return { state: 'changed', label: 'Wrong VOD stopped' };
   if (playback?.status === 'ended') return { state: 'ended', label: 'Finished' };
   if (playback?.status !== 'ready' || playback.seconds === null)

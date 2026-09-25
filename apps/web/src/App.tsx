@@ -49,30 +49,20 @@ import type { PlaybackSnapshot, StopReason } from './playback';
 import { seekBarrier } from './seekBarrier';
 import { anyPlaying, startDecision, startProgress } from './playbackStart';
 import { readStorage, writeStorage } from './storage';
+import { supportsPlayback } from './capabilities';
 import { useGridColumns } from './useGridColumns';
 
 const SESSION_KEY = 'vodsync.session.v1'; // Preserve and migrate existing workspaces.
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : 'Please retry.');
-function twitchSession(session: Session): Session {
-  const vods = session.vods.filter((v) => v.platform === 'twitch');
-  if (!vods.length) throw new Error('This release supports Twitch recordings only.');
-  const { min, max } = timelineBounds(vods);
-  return {
-    ...session,
-    view: 'grid',
-    vods,
-    momentMs: Math.max(min, Math.min(max, session.momentMs)),
-    leaderKey: vods.some((v) => vodKey(v) === session.leaderKey)
-      ? session.leaderKey
-      : vodKey(vods[0]),
-  };
+function gridSession(session: Session): Session {
+  return { ...session, view: 'grid' };
 }
 function initialState(): { session?: Session; error?: string } {
   try {
     const shared = new URLSearchParams(location.hash.slice(1)).get('session');
-    if (shared) return { session: twitchSession(decodeSession(shared)) };
+    if (shared) return { session: gridSession(decodeSession(shared)) };
     const saved = readStorage(SESSION_KEY);
-    return saved ? { session: twitchSession(validateSession(JSON.parse(saved))) } : {};
+    return saved ? { session: gridSession(validateSession(JSON.parse(saved))) } : {};
   } catch (error) {
     return { error: messageOf(error) };
   }
@@ -335,7 +325,7 @@ export default function App() {
     setPlaying(false);
   }
   function loadSession(next: Session) {
-    const clean = twitchSession(next);
+    const clean = gridSession(next);
     setVods(clean.vods);
     setRemoved(undefined);
     setDraggingKey('');
@@ -358,7 +348,7 @@ export default function App() {
       ),
     ];
     if (!inputs.length) {
-      setNotice('Paste a Twitch VOD URL, timestamped URL, clip, or VOD ID.');
+      setNotice('Paste a Twitch or Kick VOD URL, timestamped URL, or clip.');
       return;
     }
     if (inputs.length > MAX_VODS) {
@@ -371,8 +361,6 @@ export default function App() {
       results.push(
         ...(await Promise.allSettled(
           inputs.slice(i, i + 4).map(async (url) => {
-            if (parseMedia(url).platform !== 'twitch')
-              throw new Error('Twitch links only for now.');
             return resolveMedia(url, auth);
           }),
         )),
@@ -384,10 +372,7 @@ export default function App() {
       if (result.status === 'rejected') {
         errors.push({
           input: inputs[i],
-          error: messageOf(result.reason).replace(
-            /(?:Add timing details manually|add timing details manually|add timing manually)\.?/g,
-            'connect Twitch in Settings.',
-          ),
+          error: messageOf(result.reason),
         });
         return;
       }
@@ -554,8 +539,12 @@ export default function App() {
       return;
     }
     const leader =
-      vods.find((v) => vodKey(v) === leaderKey && matchMoment(v, moment).state === 'playing') ??
-      vods.find((v) => matchMoment(v, moment).state === 'playing');
+      vods.find(
+        (v) =>
+          supportsPlayback(v) &&
+          vodKey(v) === leaderKey &&
+          matchMoment(v, moment).state === 'playing',
+      ) ?? vods.find((v) => supportsPlayback(v) && matchMoment(v, moment).state === 'playing');
     if (!leader) {
       setNotice('No recording covers this moment. Seek to a recorded part of the timeline.');
       return;
@@ -656,7 +645,7 @@ export default function App() {
         }}
       />
       <form className="add-bar" onSubmit={addRecordings}>
-        <label htmlFor="vod-input">Twitch URLs</label>
+        <label htmlFor="vod-input">VOD / clip URLs</label>
         <textarea
           id="vod-input"
           value={input}
@@ -724,7 +713,7 @@ export default function App() {
       <main className={`workspace ${!vods.length ? 'empty' : ''}`}>
         {!vods.length ? (
           <div className="empty-state">
-            <h1>Add Twitch recordings</h1>
+            <h1>Add recordings</h1>
             <p>Paste links above. Sync from any player, or drag the timeline to choose a moment.</p>
           </div>
         ) : (
@@ -847,7 +836,9 @@ export default function App() {
           preparing={preparing}
           playbackStates={playbackStates}
           onSeek={(time) => {
-            const leader = vods.find((v) => matchMoment(v, time).state === 'playing');
+            const leader =
+              vods.find((v) => supportsPlayback(v) && matchMoment(v, time).state === 'playing') ??
+              vods.find((v) => matchMoment(v, time).state === 'playing');
             syncTo(
               time,
               preparing || starting ? command.playing : playersArePlaying(),
@@ -986,9 +977,9 @@ export default function App() {
         <Modal title="Using VOD Sync" close={() => setModal(null)}>
           <div className="help-content">
             <p>
-              Paste Twitch VOD URLs or IDs, timestamped URLs, or clips. The first recording sets the
-              initial moment. Adding a timestamped URL or clip selects that moment in its parent
-              VOD.
+              Paste Twitch or Kick VOD/clip URLs, timestamped URLs, or Twitch IDs. The first
+              recording sets the initial moment. Adding a timestamped URL or clip selects that
+              moment in its parent VOD.
             </p>
             <p>
               <strong>Grid:</strong> seek any player, then click its Sync button. The others jump to
@@ -1017,8 +1008,10 @@ export default function App() {
               small screens can scroll inside the player.
             </p>
             <p>
-              Kick and manual metadata entry are deferred. Public Twitch lookup is undocumented and
-              can change.
+              Kick recordings use timestamp links; Kick's embed does not support VOD playback. Use
+              recording settings to choose a Kick source timestamp. Some newer Kick links block
+              external metadata requests and cannot be added. Public metadata services are
+              undocumented and can change.
             </p>
           </div>
         </Modal>

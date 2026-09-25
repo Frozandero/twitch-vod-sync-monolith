@@ -2,11 +2,11 @@
 
 **[Open the app](https://frozandero.github.io/twitch-vod-sync-monolith/)**
 
-Sync Twitch recordings in a grid, seek a shared timeline, and get timestamp links for every VOD. Static React/TypeScript app deployed to GitHub Pages; no backend or installation.
+Sync Twitch recordings in a grid, match Twitch and Kick VODs/clips on a shared timeline, and open timestamp links. Static React/TypeScript app deployed to GitHub Pages; no backend or installation.
 
 ## Use
 
-1. Paste Twitch VOD URLs, numeric IDs, timestamped URLs, or clip URLs in the input. Separate links with newlines or spaces. Enter adds them; Shift+Enter inserts a newline.
+1. Paste Twitch or Kick VOD/clip URLs, timestamped URLs, or numeric Twitch IDs in the input. Separate links with newlines or spaces. Enter adds them; Shift+Enter inserts a newline.
 2. Play or seek any player and click **Sync** in its header. The other players seek to that broadcast moment and follow its play/pause state.
 3. Click or drag the timeline to seek all recordings. Keyboard arrows, Home, and End work too. Its range includes all recordings and gaps. The **chevron button in the top-right player header** collapses or expands the timeline without interrupting playback. It stays in place in both states, and a hidden timeline takes no space below the grid. This preference is saved locally. The × beside a timeline name removes that recording from the session, just like its player’s close button.
 4. Use the go-to icon beside any timeline timestamp to open that VOD at the selected moment. Player headers also retain a link to their current playback position. These are regular links that can be copied through the browser's link menu. Non-matches are labeled with exact gaps in player overlays and timeline tooltips; their links open the recording boundary.
@@ -24,7 +24,9 @@ The thin timeline line is the selected broadcast moment; each player’s thicker
 
 Sessions save locally. Share them by URL or import/export JSON through the more-options menu. Existing version-1 sessions migrate automatically. Sessions previously saved in Links view now open in the grid.
 
-**Kick is deferred at the owner's request.** The web app accepts Twitch only. Experimental Kick parsing/provider research remains isolated in shared packages; it is not a shipped capability.
+**Kick uses timestamp links, not embedded playback.** Add current or legacy Kick VOD URLs and `/channel/clips/clip_…` or `?clip=clip_…` links. Clips resolve to their parent recording at the clip's start offset. Kick cards and timeline rows link to the selected timestamp; use **Choose source timestamp** to match from a Kick recording. Mixed and Kick-only sessions save/share normally. Kick never participates in Twitch's buffering/start wait or displays a verified playback marker.
+
+Current Kick VOD IDs are resolved through explicit mappings in Kick's older public metadata service. The app checks up to 50 recent channel recordings, reuses concurrent lookups, and caches metadata for five minutes. Older or unindexed recordings may fail because Kick's newer service blocks cross-origin browser requests. Missing parents, private/expired recordings, and incomplete broadcasts produce an error; there is no proxy or guessed broadcast date.
 
 ## Limitations
 
@@ -75,4 +77,4 @@ No client secret is used. The browser uses Twitch's implicit grant with empty sc
 
 ## Privacy
 
-Recording metadata is stored in your browser. Metadata and player requests go directly to Twitch; its embeds have their own cookies/network behavior. No app backend, analytics, external font service, or public CORS proxy is used. Shared sessions expose recording URLs and timing to anyone with the link, not credentials.
+Recording metadata is stored in your browser. Metadata requests go directly to Twitch or Kick, and player requests go to Twitch; its embeds have their own cookies/network behavior. No app backend, analytics, external font service, or public CORS proxy is used. Shared sessions expose recording URLs and timing to anyone with the link, not credentials.

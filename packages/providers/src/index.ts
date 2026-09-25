@@ -1,3 +1,4 @@
+import { resolveKick } from './kick';
 import {
   parseMedia,
   parseTime,
@@ -118,32 +119,6 @@ async function twitchClip(
   if (ref.offsetSeconds >= duration) throw new Error('Timestamp is outside the clip.');
   return { vod: await twitchVod(id, auth, fetcher), offsetSeconds: offset + ref.offsetSeconds };
 }
-async function kickVod(ref: MediaRef, fetcher: Fetcher): Promise<Vod> {
-  const data = await json(
-    `https://kick.com/api/v1/video/${encodeURIComponent(ref.id)}`,
-    {},
-    fetcher,
-  );
-  const live = data.livestream;
-  // Do not substitute video upload time for the actual broadcast start.
-  if (!live?.start_time || !live?.duration || live.is_live)
-    throw new Error(
-      'Kick did not return a completed broadcast with reliable start time. Add timing details manually.',
-    );
-  const rawStart = String(live.start_time).replace(' ', 'T');
-  const startedAt = /(?:Z|[+-]\d{2}:\d{2})$/.test(rawStart) ? rawStart : `${rawStart}Z`;
-  return validateVod({
-    platform: 'kick',
-    id: ref.id,
-    url: ref.url,
-    title: live.session_title ?? 'Kick recording',
-    channel: live.channel?.user?.username ?? live.channel?.slug ?? 'Kick',
-    startedAt,
-    durationSeconds: live.duration / 1000,
-    correctionSeconds: 0,
-    provenance: 'kick-public',
-  });
-}
 export async function resolveMedia(
   input: string,
   auth?: TwitchAuth,
@@ -151,8 +126,7 @@ export async function resolveMedia(
 ): Promise<ResolvedMedia> {
   const ref = parseMedia(input);
   try {
-    if (ref.platform === 'kick')
-      return { vod: await kickVod(ref, fetcher), offsetSeconds: ref.offsetSeconds };
+    if (ref.platform === 'kick') return await resolveKick(ref, fetcher);
     if (ref.kind === 'clip') return await twitchClip(ref, auth, fetcher);
     return { vod: await twitchVod(ref.id, auth, fetcher), offsetSeconds: ref.offsetSeconds };
   } catch (error) {
@@ -161,7 +135,7 @@ export async function resolveMedia(
       (error instanceof DOMException && ['TimeoutError', 'AbortError'].includes(error.name))
     )
       throw new Error(
-        `${ref.platform === 'kick' ? 'Kick often blocks browser metadata requests. Retry or add timing details manually.' : 'Could not reach Twitch. Retry or connect Twitch in Settings.'}`,
+        `${ref.platform === 'kick' ? 'Could not reach Kick metadata. Retry or open the link on Kick.' : 'Could not reach Twitch. Retry or connect Twitch in Settings.'}`,
       );
     throw error;
   }

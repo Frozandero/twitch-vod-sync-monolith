@@ -6,7 +6,7 @@ This file records actual checks and their limits. A passing build does not prove
 
 ## Automated coverage
 
-110 core/provider/player tests pass, with TypeScript and production-build checks. Coverage includes timestamp formats, URL validation, timezones, exact start/end boundaries, gaps, corrections, subsecond arithmetic, Unicode sessions, v1 migration, oversized shares, stripping unknown credentials, clip zero/null offsets, missing VODs, uploads/highlights, official API routing, auth errors, initial unconfirmed player clocks, finished/foreign VOD detachment, drift labels, validated paused-seek acknowledgments, stale command rejection, buffer stability, slow/failed players, boundary exclusions, confirmed PLAYING starts, bounded retry decisions, target-only playback, and the isolated experimental Kick adapter.
+135 core/provider/player tests pass, with TypeScript and production-build checks. Coverage includes timestamp formats, URL validation, timezones, exact start/end boundaries, gaps, corrections, subsecond arithmetic, Unicode sessions, v1 migration, oversized shares, stripping unknown credentials, clip zero/null offsets, missing VODs, uploads/highlights, official API routing, auth errors, initial unconfirmed player clocks, finished/foreign VOD detachment, drift labels, validated paused-seek acknowledgments, stale command rejection, buffer stability, slow/failed players, boundary exclusions, confirmed PLAYING starts, bounded retry decisions, target-only playback, Kick VOD/clip canonical IDs, restricted/malformed metadata, and mixed-provider capability exclusions.
 
 ## Browser and deployment
 
@@ -36,8 +36,16 @@ This file records actual checks and their limits. A passing build does not prove
 - The first [GitHub Pages deployment](https://github.com/Frozandero/twitch-vod-sync-monolith/actions/runs/36141399577) succeeded. The published repository-subpath page loaded, resolved both real Twitch VODs to the expected timestamps, and loaded their official player frames with the correct parent host.
 - The production smoke check exposed Twitch returning an initial zero while its iframe showed the requested two-hour position. The app now displays the requested position and prevents Sync from that player until Twitch reports a position or starts playback. Regression tests cover initial zero, later valid seeks to zero, and invalid clock values.
 
+## Kick integration — 2026-09-25
+
+- Public-site research in Brave verified VOD/clip formats, Share's seconds-based timestamp query, and a clip's Watch full video destination. The existing account was not changed; no clips, messages, or account settings were submitted.
+- Real credential-free requests from localhost resolved current VODs `01a0d4be-acc8-79a9-accb-14af04328c11` and `01a0d036-d2e8-7921-a378-da2f05c97032`, plus clip `clip_01M35VYB72DC0GQ7GXNYBEFKYA`. The clip parent normalized to current ID `01a0cb24-ca08-7953-9e4a-ae201b03b8ef`. Its old URL displayed Kick's 404 page; its canonical timestamp link loaded the VOD correctly.
+- A mixed session with Twitch `2882074717` mapped Kick's 2026-09-23 VOD at `00:05:00` to Twitch at `03:35:59`. Only the Twitch recording created an iframe; Kick entries had no actual-playback markers. Kick-only sessions kept the shared seek/link workflow and disabled playback.
+- At desktop 1920px and mobile 390×844, Kick cards, source timestamp settings, watch mode, and timeline collapse fitted without page-level horizontal overflow. Starting a visible mixed pair completed the one-player Twitch buffer/start wait; the Kick link timestamp advanced with Twitch's clock. Pause stopped it. Choosing Kick `00:10:00` issued a paused Twitch seek; reload retained both providers and that moment.
+- Adding the real clip with `?t=5` alongside its legacy parent URL produced one canonical recording at `02:34:57` (`?t=9297`). Earlier/later recordings displayed boundary gaps; a before-start Twitch embed was removed. The Brave viewport override was reset after verification.
+
 ## Explicitly unverified integration paths
 
 - A registered Twitch application and real OAuth sign-in have not been supplied. Official Helix behavior is tested with fixtures; a real redirect/consent/token session requires that setup.
-- Kick was deferred by the owner. A clean extension-disabled Brave session reached its homepage, but no Kick VOD integration is shipped or claimed verified.
+- Kick embedded VOD playback is unavailable and is not claimed. Very old/unindexed recordings can fail when only the newer CORS-blocked service knows them. Provider changes, expired parents, and restricted recordings remain external limitations.
 - Subscriber/private VOD playback, mobile autoplay, and ad interruption behavior are controlled by Twitch and are not guaranteed by deterministic tests.

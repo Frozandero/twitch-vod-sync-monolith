@@ -83,7 +83,7 @@ export function parseMedia(input: string): MediaRef {
   try {
     url = new URL(value);
   } catch {
-    throw new Error('Enter a Twitch or Kick VOD URL, Twitch clip, or Twitch VOD ID.');
+    throw new Error('Enter a Twitch or Kick VOD/clip URL, or a Twitch VOD ID.');
   }
   if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password || url.port)
     throw new Error('Use a regular Twitch or Kick URL.');
@@ -125,16 +125,23 @@ export function parseMedia(input: string): MediaRef {
       return {
         platform: 'kick',
         kind: 'vod',
-        id: vod[1],
-        url: `https://kick.com${path}`,
+        id: vod[1].toLowerCase(),
+        url: `https://kick.com${path.toLowerCase()}`,
         offsetSeconds,
       };
-    if (url.searchParams.has('clip') || path.includes('/clips/'))
-      throw new Error(
-        'Kick clips do not expose reliable recording offsets. Use the parent VOD and its timestamp.',
-      );
+    const clip = /^\/([\w-]+)\/clips\/(clip_[\w-]{1,100})$/.exec(path);
+    const legacyClip = /^\/[\w-]+$/.test(path) ? url.searchParams.get('clip') : null;
+    const id = clip?.[2] ?? legacyClip;
+    if (id && /^clip_[\w-]{1,100}$/.test(id))
+      return {
+        platform: 'kick',
+        kind: 'clip',
+        id,
+        url: `https://kick.com/${(clip?.[1] ?? path.slice(1)).toLowerCase()}/clips/${id}`,
+        offsetSeconds,
+      };
   }
-  throw new Error('Unsupported link. Use a Twitch VOD/clip or a Kick VOD URL.');
+  throw new Error('Unsupported link. Use a Twitch or Kick VOD/clip URL.');
 }
 
 export const vodKey = (vod: Pick<Vod, 'platform' | 'id'>) => `${vod.platform}:${vod.id}`;

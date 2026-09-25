@@ -1,6 +1,6 @@
 # Agent guide
 
-Read README.md and docs/ARCHITECTURE.md before changing behavior. Read docs/RESEARCH.md for provider assumptions and docs/STATUS.md for verification limits. The current user-approved scope is Twitch only; Kick and manual metadata-entry UI are deferred.
+Read README.md and docs/ARCHITECTURE.md before changing behavior. Read docs/RESEARCH.md for provider assumptions and docs/STATUS.md for verification limits. The current user-approved scope includes Twitch playback and Kick VOD/clip timestamp matching. Manual metadata-entry UI remains deferred.
 
 ## Structure and commands
 
@@ -15,7 +15,7 @@ Read README.md and docs/ARCHITECTURE.md before changing behavior. Read docs/RESE
 - A shared moment is VOD start + timing correction + playback seconds. Intervals are half-open: start is playable, exact end is ended.
 - Before-start recordings are held at zero; ended recordings are held at the end and display an ended state. Remove inactive/finished Twitch embeds so Up Next cannot start another recording; recreate only the requested VOD on a playable seek. Never generate a playable match for either boundary.
 - Guard Twitch getVideo/getEnded before accepting clocks or issuing playback commands. A foreign video ID must stop and detach the embed, never inherit the session VOD’s timing. Timeline coverage is not proof of synchronized playback: show verified player positions and drift separately from the selected moment.
-- Shared seeks pause all players and freeze the shared moment until every matching VOD confirms the current command's target, a stable buffer, and a paused state. Exclude before/ended VODs; never release based on a stale serial, READY alone, or an unverified clock. Preserve play/pause intent, support cancellation/retry, and keep readiness UI outside the Twitch frame.
+- Shared seeks pause all players and freeze the shared moment until every matching VOD confirms the current command's target, a stable buffer, and a paused state. Exclude before/ended VODs and link-only providers; never release based on a stale serial, READY alone, or an unverified clock. Preserve play/pause intent, support cancellation/retry, and keep readiness UI outside the Twitch frame.
 - Confirm group starts with current-command PLAYING acknowledgments, not play() calls or unpaused buffering alone. Retry the whole group at the selected moment with a finite limit; a failed start pauses everyone and identifies the affected recordings. Pause must work when any matching player is running, and cancellation must prevent delayed starts. Do not continuously force playback after a confirmed start.
 - A clip's creation/upload time is not its broadcast time. Require its parent VOD and start offset. Never subtract clip duration from GET Clips vod_offset.
 - Reject highlights/uploads for automatic wall-clock mapping. Do not restore the removed manual metadata form without a request.
@@ -25,7 +25,7 @@ Read README.md and docs/ARCHITECTURE.md before changing behavior. Read docs/RESE
 - Keep the interface compact: no slogan/sidebar recording list, demo button, or Grid/Links tabs. Keep timestamp links in player headers and beside every timeline timestamp, exact non-match gaps, per-player controls, watch mode, and a collapsible shared seeker. Hiding the seeker must not remount players or change playback.
 - Reordering changes session order and CSS positions, never iframe DOM positions or playback commands. Keep grid/timeline order consistent and include it in persistence/share/export. Provide keyboard/touch alternatives to dragging and preserve remaining playback when closing a non-source recording.
 - Keep the user-approved grid sizing. Watch-mode exit and timeline toggle belong in an existing player header, with no empty control strips above/below the grid and no overlap over video. Do not restore automatic 16:9 row fitting without a request.
-- Kick code is isolated experimental research, not a shipped web capability.
+- Kick VODs are link-only: never load a Twitch iframe for them, report a synthetic playback clock, or include them in buffer/start barriers. Resolve current/legacy IDs only through explicit provider mappings, never dates or UUID heuristics. Keep Kick API handling isolated in packages/providers/src/kick.ts.
 - Document changes to provider assumptions with primary sources and dated observations.
 - Future extension work belongs in `apps/extension`, consumes shared packages, and requires a separate request. Do not add extension permissions speculatively.
 

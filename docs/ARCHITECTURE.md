@@ -5,7 +5,7 @@
 An npm-workspace monorepo builds static HTML/CSS/JavaScript with Vite into `apps/web/dist`. GitHub Actions deploys that artifact to Pages. There is no backend, proxy, service worker, database, or runtime secret.
 
 - `@vodsync/core`: validated URL parsing, timestamps, UTC arithmetic, before/playing/ended states, canonical links, versioned sessions. No third-party dependencies; reusable by an extension.
-- `@vodsync/providers`: optional official Twitch Helix and anonymous Twitch GraphQL adapters. Fetch is injectable for deterministic tests. Requests time out and omit cookies. An experimental Kick adapter remains isolated, unreachable from the Twitch-only web entry point.
+- `@vodsync/providers`: optional official Twitch Helix and anonymous Twitch GraphQL adapters. Fetch is injectable for deterministic tests. Requests time out and omit cookies. The Kick adapter is isolated in `kick.ts`: completed VOD metadata, legacy/current ID normalization, parent-VOD clip offsets, and a bounded channel index lookup. Shared in-flight requests and a five-minute cache contain only validated recording metadata and IDs.
 - `@vodsync/web`: compact URL input, player grid, timestamp links in each player header and timeline row, collapsible shared seeker, per-recording controls, watch mode, local persistence and OAuth.
 
 ## Time model
@@ -54,7 +54,7 @@ Sessions are validated before export/import:
 
 - Version 2 stores recordings, `leaderKey`, absolute `momentMs`, and a legacy view field. The web app always exports `grid` and accepts older `links` sessions into the grid without losing their recordings or moment.
 - Version 1 migrates its source key/relative timestamp into the same absolute moment. The local storage key is preserved.
-- Legacy Kick entries are filtered on web import/restore; an all-Kick session is rejected.
+- Twitch, Kick-only, and mixed sessions retain their recordings and source on import/restore.
 - Required unique identities, canonical supported-host URLs, timezone-aware dates, finite numeric bounds, a leader present in the recordings, and a moment inside the full timeline are enforced.
 - Imports have size and 100-item resource guards. Shared fragments are base64url UTF-8 JSON capped at 60,000 characters; larger sessions use JSON export.
 - Constructing a new allowlisted session strips unknown keys, including credentials.
@@ -64,3 +64,9 @@ Local storage holds the recording session and optional public Client ID. Session
 ## Interface constraints
 
 Use a compact utility interface: URL input, player grid, per-player actions, and a collapsible seeker. No view tabs, slogans, decorative workspace headings, sidebar recording list, demo button, manual metadata-entry form, or feature footer. Every timeline row has a remove button beside its name and a timestamp link beside its time; the seek overlay must not cover either control. Timeline and player removal share the same session operation. Exit watch mode and timeline toggle share an existing player header; do not reserve otherwise empty rows or place controls over Twitch's content. Before/ended links explicitly identify the boundary and gap. Watch mode hides setup without requiring fullscreen permissions. Keep responsive sizing and keyboard focus visible.
+
+## Kick capabilities
+
+Kick cards display mapped timestamp links and source timestamp settings. The official embed supports live channels only; the app does not substitute a custom media player or pretend to control the Kick tab. `supportsPlayback` gates the shared seek/start barriers, playback source selection, and clock-alignment display. Kick has no player handle, iframe, autoplay, or verified actual playhead. Source selection by a Kick URL or settings still computes a UTC moment for Twitch; playing/seeking a running mixed session chooses a matching Twitch clock.
+
+`kick.ts` tries the cookie-free legacy VOD endpoint first. Its `livestream.vod_id` explicitly identifies the current canonical VOD. On 404, a channel-qualified URL can inspect up to 50 legacy list entries in batches of three, matching the requested ID against that explicit field. It never equates recordings by date/duration or derives an identity from UUID bytes. Metadata preserves the broadcast start, and legacy duration milliseconds are converted to seconds. New-service durations are already seconds. The new service is a final fallback but currently fails CORS from external websites; the error is explicit. Restriction/rate-limit responses do not trigger a bypass. Clip resolution requires a valid parent, nonnegative `vod_starts_at`, a clip-local time within duration, and a resulting offset inside the parent VOD. Returned credentials/media URLs are not serialized or cached.

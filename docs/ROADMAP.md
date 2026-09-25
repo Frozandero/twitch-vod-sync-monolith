@@ -11,7 +11,7 @@
 
 ## Deferred
 
-**Kick is on hold at the owner's request.** Keep the existing research and isolated experimental adapter, but do not advertise or expose it in the web UI. Manual broadcast-metadata entry is also out of the current UI.
+**Kick VOD/clip timestamp matching is included.** Current and legacy IDs are resolved through explicit metadata mappings where available. Kick embedded VOD playback remains unavailable; manual broadcast-metadata entry remains out of the UI.
 
 ## Future extension
 
@@ -24,5 +24,5 @@ Build/release extension artifacts independently from Pages while keeping the sou
 - Segment-aware alignment for edited streams and reconnect gaps.
 - Opt-in drift correction that accounts for ads, user seeks, and readiness.
 - Layout presets for large grids.
-- Official Kick VOD integration if supported APIs become available and the feature is requested again.
+- Controllable Kick VOD playback when a supported embed/API is available.
 - More browser/provider checks for authenticated and mobile playback.
