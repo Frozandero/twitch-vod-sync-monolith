@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Vod } from '@vodsync/core';
 import { resolveKickPlayback } from '@vodsync/providers';
-import { bufferAhead, createKickPlayer, mediaPosition } from './kickPlayer';
+import { bufferAhead, bufferedSeekTarget, createKickPlayer, mediaPosition } from './kickPlayer';
 
 vi.mock('@vodsync/providers', () => ({ resolveKickPlayback: vi.fn() }));
 
@@ -109,6 +109,21 @@ describe('Kick player lifecycle', () => {
     expect(callbacks.playing).toHaveBeenCalledOnce();
     player.destroy();
   });
+  it('seeks to an available frame without declaring the requested gap buffered', async () => {
+    const { video, player } = setup(Promise.resolve('https://stream.kick.com/test.m3u8'));
+    await Promise.resolve();
+    player.seek(300);
+    video.readyState = 4;
+    video.buffered = ranges([[300.016, 330]]);
+    expect(player.sample()).toEqual({ seconds: null, bufferSeconds: 0 });
+    expect(video.currentTime).toBe(300.016);
+    video.seeking = true;
+    expect(player.sample().seconds).toBeNull();
+    video.seeking = false;
+    expect(player.sample().seconds).toBe(300.016);
+    expect(player.sample().bufferSeconds).toBeGreaterThan(29);
+    player.destroy();
+  });
   it('treats a cancelled pending play as cancellation, not a blocked or failed start', async () => {
     const { video, player, callbacks } = setup(
       Promise.resolve('https://stream.kick.com/test.m3u8'),
@@ -131,6 +146,12 @@ describe('Kick player lifecycle', () => {
   });
 });
 describe('native Kick media readiness', () => {
+  it('finds the next buffered frame only within a frame-sized gap', () => {
+    expect(bufferedSeekTarget(ranges([[300.016, 330]]), 300)).toBe(300.016);
+    expect(bufferedSeekTarget(ranges([[300.016, 330]]), 300.016)).toBe(300.016);
+    expect(bufferedSeekTarget(ranges([[300.1, 330]]), 300)).toBe(300);
+    expect(bufferedSeekTarget(ranges([[400, 430]]), 300)).toBe(300);
+  });
   it('does not confuse buffered video elsewhere with the selected moment', () => {
     expect(
       bufferAhead(

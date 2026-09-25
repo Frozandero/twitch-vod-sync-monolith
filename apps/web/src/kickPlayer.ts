@@ -11,6 +11,16 @@ export function bufferAhead(ranges: TimeRanges, seconds: number) {
   return 0;
 }
 
+// HLS audio/video timestamps can start a frame after an exact seek. Seek to
+// that real buffered frame; never count a gap as buffered or skip a larger gap.
+export function bufferedSeekTarget(ranges: TimeRanges, seconds: number) {
+  for (let i = 0; i < ranges.length; i++) {
+    const start = ranges.start(i);
+    if (start > seconds && start - seconds <= 0.05) return start;
+  }
+  return seconds;
+}
+
 export function mediaPosition(
   video: Pick<HTMLVideoElement, 'currentTime' | 'readyState' | 'seeking' | 'ended'>,
 ) {
@@ -53,7 +63,8 @@ export function createKickPlayer(
   let alive = true,
     failed = false,
     hls: Hls | undefined,
-    initialized = false;
+    initialized = false,
+    requested: number | undefined = offset;
   const events = new AbortController();
   const listen = (name: string, callback: () => void) =>
     video.addEventListener(name, callback, { signal: events.signal });
@@ -131,13 +142,32 @@ export function createKickPlayer(
       if (seconds === null) throw new Error('Kick has not reported a playback position yet.');
       return seconds;
     },
-    sample: () => ({
-      seconds: failed ? null : mediaPosition(video),
-      bufferSeconds: bufferAhead(video.buffered, video.currentTime),
-    }),
+    sample: () => {
+      const seconds = failed ? null : mediaPosition(video);
+      const buffered = bufferAhead(video.buffered, video.currentTime);
+      if (
+        requested !== undefined &&
+        seconds !== null &&
+        video.paused &&
+        Math.abs(seconds - requested) <= 0.5
+      ) {
+        if (buffered > 0) requested = undefined;
+        else {
+          const frame = bufferedSeekTarget(video.buffered, seconds);
+          if (frame !== seconds) {
+            video.currentTime = frame;
+            return { seconds: null, bufferSeconds: 0 };
+          }
+        }
+      }
+      return { seconds, bufferSeconds: buffered };
+    },
     isPaused: () => video.paused,
     seek(time: number) {
-      if (alive && !failed) video.currentTime = time;
+      if (alive && !failed) {
+        requested = time;
+        video.currentTime = time;
+      }
     },
     pause() {
       video.pause();

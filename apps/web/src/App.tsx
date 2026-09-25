@@ -182,14 +182,16 @@ export default function App() {
   }, []);
   const updateDuration = useCallback((key: string, seconds: number) => {
     if (!Number.isFinite(seconds) || seconds <= 0 || seconds > 31536000) return;
+    // Session UTC moments have millisecond precision. Round inward so a tiny
+    // media-duration rounding difference cannot demand nonexistent end buffer.
+    const duration = Math.floor(seconds * 1000) / 1000;
+    if (duration <= 0) return;
     // Kick's broadcast metadata can overestimate the finished playlist. Use the
     // loaded media's actual end for coverage and buffer requirements.
     setVods((current) =>
       current.map((vod) =>
-        vod.platform === 'kick' &&
-        vodKey(vod) === key &&
-        Math.abs(vod.durationSeconds - seconds) > 0.01
-          ? { ...vod, durationSeconds: seconds }
+        vod.platform === 'kick' && vodKey(vod) === key && vod.durationSeconds !== duration
+          ? { ...vod, durationSeconds: duration }
           : vod,
       ),
     );
