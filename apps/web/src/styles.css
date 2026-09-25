@@ -172,26 +172,6 @@ svg {
   font-weight: 400;
   color: #aaaeb6;
 }
-.view-tabs {
-  display: flex;
-  height: 100%;
-  gap: 2px;
-}
-.view-tabs button {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  border: 0;
-  border-bottom: 2px solid transparent;
-  background: none;
-  color: #9da0a9;
-  padding: 0 12px;
-  font-size: 12px;
-}
-.view-tabs button.active {
-  border-bottom-color: var(--accent);
-  color: #e1e9d9;
-}
 .app-actions {
   margin-left: auto;
   display: flex;
@@ -455,6 +435,12 @@ svg {
   font-size: 12px;
 }
 .timeline {
+  --label-width: 101px;
+  --time-width: 76px;
+  --link-width: 28px;
+  --lane-gap: 10px;
+  --track-left: calc(var(--label-width) + var(--lane-gap));
+  --track-right: calc(var(--time-width) + var(--link-width) + 2 * var(--lane-gap));
   margin: 0 8px 8px;
   border: 1px solid var(--line);
   background: #1b1c20;
@@ -482,10 +468,21 @@ svg {
   font-size: 10px;
   color: #9699a2;
 }
+.timeline-toggle {
+  margin-left: auto;
+  font-size: 11px;
+}
+.timeline.collapsed {
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+.timeline.collapsed .timeline-toolbar {
+  margin-bottom: 0;
+}
 .timeline-ruler {
   display: flex;
   justify-content: space-between;
-  margin: 0 86px 4px 111px;
+  margin: 0 var(--track-right) 4px var(--track-left);
   color: #9699a2;
   font: 10px var(--mono);
 }
@@ -493,13 +490,13 @@ svg {
   position: relative;
 }
 .timeline-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: var(--label-width) minmax(0, 1fr) var(--time-width) var(--link-width);
   align-items: center;
-  gap: 10px;
+  gap: var(--lane-gap);
   min-height: 24px;
 }
 .timeline-row > span {
-  width: 101px;
   flex-shrink: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -542,18 +539,21 @@ svg {
 }
 .timeline-row > time {
   font: 11px var(--mono);
-  width: 76px;
   flex-shrink: 0;
   color: #bfc6b7;
   text-align: right;
 }
+.timeline-row.before > time,
+.timeline-row.ended > time {
+  color: #cdb793;
+}
 .timeline-seeker {
   position: absolute;
-  left: 108px;
-  right: 83px;
+  left: calc(var(--track-left) - 3px);
+  right: calc(var(--track-right) - 3px);
   top: 0;
   bottom: 0;
-  width: calc(100% - 191px);
+  width: calc(100% - var(--track-left) - var(--track-right) + 6px);
   height: 100%;
   padding: 0;
   margin: 0;
@@ -592,83 +592,6 @@ svg {
 }
 .timeline-seeker:hover {
   background: #dcebcf08;
-}
-.links-view {
-  padding: 0 8px;
-}
-.links-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  min-height: 40px;
-  border-bottom: 1px solid var(--line);
-}
-.links-toolbar time {
-  font: 11px var(--mono);
-  color: #a8adb6;
-}
-.links-toolbar .text-button {
-  font-size: 11px;
-}
-.link-row {
-  display: flex;
-  align-items: center;
-  gap: 24px;
-  padding: 16px 6px;
-  border-bottom: 1px solid var(--line);
-}
-.link-info {
-  min-width: 0;
-  flex: 1;
-}
-.link-info h2 {
-  font-size: 14px;
-  font-weight: 550;
-}
-.link-info p {
-  font-size: 11px;
-  color: #979ca5;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  margin-top: 4px;
-  max-width: 750px;
-}
-.match-description {
-  font-size: 11px;
-  color: #a9bd94;
-  display: block;
-  margin-top: 5px;
-}
-.before .match-description,
-.ended .match-description {
-  color: #cdb793;
-}
-.link-timestamp {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 3px;
-}
-.time-button {
-  font: 20px var(--mono);
-  border: 0;
-  background: none;
-  padding: 3px;
-  color: #d3dbcb;
-}
-.time-button:hover {
-  background: #30362b;
-  border-radius: 3px;
-}
-.link-timestamp small {
-  font-size: 10px;
-  color: #858b94;
-}
-.row-actions {
-  display: flex;
-  gap: 4px;
 }
 .notice {
   display: flex;
@@ -880,11 +803,6 @@ dialog::backdrop {
   .brand {
     font-size: 15px;
   }
-  .view-tabs button {
-    padding: 0 8px;
-    font-size: 11px;
-    gap: 4px;
-  }
   .app-actions {
     gap: 4px;
   }
@@ -946,6 +864,9 @@ dialog::backdrop {
     min-height: 300px;
   }
   .timeline {
+    --label-width: 70px;
+    --time-width: 64px;
+    --lane-gap: 7px;
     margin: 0 5px 5px;
     padding: 6px;
   }
@@ -955,59 +876,14 @@ dialog::backdrop {
   .timeline-toolbar > span {
     display: none;
   }
-  .timeline-row {
-    gap: 7px;
-  }
   .timeline-row > span {
-    width: 70px;
     font-size: 10px;
   }
   .timeline-row > time {
-    width: 64px;
     font-size: 10px;
   }
   .timeline-ruler {
-    margin-left: 77px;
-    margin-right: 71px;
     font-size: 8px;
-  }
-  .timeline-seeker {
-    left: 74px;
-    right: 68px;
-    width: calc(100% - 142px);
-  }
-  .links-view {
-    padding: 0 3px;
-  }
-  .link-row {
-    gap: 10px;
-    padding: 13px 0;
-    flex-wrap: wrap;
-  }
-  .link-info {
-    flex-basis: calc(100% - 110px);
-  }
-  .link-info h2 {
-    font-size: 13px;
-  }
-  .link-info p {
-    font-size: 10px;
-  }
-  .match-description {
-    font-size: 10px;
-  }
-  .time-button {
-    font-size: 18px;
-  }
-  .row-actions {
-    margin-left: auto;
-    gap: 7px;
-  }
-  .links-toolbar time {
-    font-size: 9px;
-  }
-  .links-toolbar .text-button {
-    font-size: 10px;
   }
   .demo-banner {
     font-size: 10px;

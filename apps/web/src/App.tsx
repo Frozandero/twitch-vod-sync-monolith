@@ -1,13 +1,10 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import {
   Check,
-  Copy,
   Download,
   ExternalLink,
   FileUp,
-  Grid2X2,
   Info,
-  Link2,
   LoaderCircle,
   Maximize2,
   Minimize2,
@@ -15,7 +12,6 @@ import {
   Plus,
   Settings2,
   Share2,
-  SlidersHorizontal,
   Trash2,
   X,
 } from 'lucide-react';
@@ -24,7 +20,6 @@ import {
   decodeSession,
   encodeSession,
   formatTime,
-  matchDescription,
   matchMoment,
   momentAt,
   parseMedia,
@@ -56,6 +51,7 @@ function twitchSession(session: Session): Session {
   const { min, max } = timelineBounds(vods);
   return {
     ...session,
+    view: 'grid',
     vods,
     momentMs: Math.max(min, Math.min(max, session.momentMs)),
     leaderKey: vods.some((v) => vodKey(v) === session.leaderKey)
@@ -119,7 +115,6 @@ export default function App() {
   const [vods, setVods] = useState<Vod[]>(initial.session?.vods || []);
   const [leaderKey, setLeaderKey] = useState(initial.session?.leaderKey || '');
   const [moment, setMoment] = useState(initial.session?.momentMs || 0);
-  const [view, setView] = useState<'grid' | 'links'>(initial.session?.view || 'grid');
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
   const [failures, setFailures] = useState<{ input: string; error: string }[]>([]);
@@ -154,7 +149,7 @@ export default function App() {
     else handles.current.delete(key);
   }, []);
   const session = (): Session =>
-    validateSession({ version: 2, vods, leaderKey, momentMs: moment, view });
+    validateSession({ version: 2, vods, leaderKey, momentMs: moment, view: 'grid' });
 
   useEffect(() => {
     restoreAuth()
@@ -186,7 +181,7 @@ export default function App() {
     } catch {
       /* Transient state while changing recordings. */
     }
-  }, [vods, leaderKey, moment, view]);
+  }, [vods, leaderKey, moment]);
   useEffect(() => () => clearTimeout(copyTimer.current), []);
   useEffect(() => {
     const escape = (event: KeyboardEvent) => {
@@ -197,7 +192,6 @@ export default function App() {
   }, []);
   // Follow the last synced player's clock without repeatedly seeking the others.
   useEffect(() => {
-    if (view !== 'grid') return;
     const timer = setInterval(() => {
       const handle = handles.current.get(leaderKey),
         vod = vods.find((v) => vodKey(v) === leaderKey);
@@ -214,7 +208,7 @@ export default function App() {
       }
     }, 500);
     return () => clearInterval(timer);
-  }, [leaderKey, vods, view]);
+  }, [leaderKey, vods]);
 
   function syncTo(nextMoment: number, nextPlaying = false, leader = leaderKey) {
     setMoment(nextMoment);
@@ -225,7 +219,6 @@ export default function App() {
   function loadSession(next: Session) {
     const clean = twitchSession(next);
     setVods(clean.vods);
-    setView(clean.view);
     setFailures([]);
     setNotice('');
     syncTo(clean.momentMs, false, clean.leaderKey);
@@ -381,7 +374,6 @@ export default function App() {
       setNotice('No recording covers this moment. Seek to a recorded part of the timeline.');
       return;
     }
-    if (view === 'links') setView('grid');
     syncTo(moment, !playing, vodKey(leader));
   }
 
@@ -391,28 +383,6 @@ export default function App() {
         <a className="brand" href={import.meta.env.BASE_URL}>
           VOD <span>Sync</span>
         </a>
-        <nav className="view-tabs" aria-label="View">
-          <button
-            className={view === 'grid' ? 'active' : ''}
-            onClick={() => {
-              setView('grid');
-              setPlaying(false);
-            }}
-          >
-            <Grid2X2 size={15} />
-            Grid
-          </button>
-          <button
-            className={view === 'links' ? 'active' : ''}
-            onClick={() => {
-              setView('links');
-              setPlaying(false);
-            }}
-          >
-            <Link2 size={15} />
-            Links
-          </button>
-        </nav>
         <div className="app-actions">
           <button
             className="button"
@@ -426,10 +396,7 @@ export default function App() {
           <button
             className="button watch-button"
             aria-label="Watch mode"
-            onClick={() => {
-              setView('grid');
-              setWatchMode(true);
-            }}
+            onClick={() => setWatchMode(true)}
             disabled={!vods.length}
           >
             <Maximize2 size={14} />
@@ -553,7 +520,7 @@ export default function App() {
             <h1>Add Twitch recordings</h1>
             <p>Paste links above. Sync from any player, or drag the timeline to choose a moment.</p>
           </div>
-        ) : view === 'grid' ? (
+        ) : (
           <div className="player-grid">
             {vods.map((vod) => (
               <Player
@@ -570,102 +537,6 @@ export default function App() {
               />
             ))}
           </div>
-        ) : (
-          <section className="links-view" aria-label="Timestamps for all recordings">
-            <div className="links-toolbar">
-              <time>{new Date(moment).toISOString().replace('T', ' ').slice(0, 19)} UTC</time>
-              <button
-                className="text-button"
-                onClick={() =>
-                  copy(
-                    vods
-                      .map((v) => {
-                        const m = matchMoment(v, moment);
-                        return `${v.channel} · ${formatTime(m.offsetSeconds)} · ${matchDescription(m)}\n${m.url}`;
-                      })
-                      .join('\n\n'),
-                    'all',
-                  )
-                }
-              >
-                {copied === 'all' ? <Check size={14} /> : <Copy size={14} />}Copy all
-              </button>
-            </div>
-            <div className="link-list">
-              {vods.map((vod) => {
-                const match = matchMoment(vod, moment);
-                return (
-                  <article className={`link-row ${match.state}`} key={vodKey(vod)}>
-                    <div className="link-info">
-                      <h2>{vod.channel}</h2>
-                      <p title={vod.title}>{vod.title}</p>
-                      <span className="match-description">{matchDescription(match)}</span>
-                    </div>
-                    <div className="link-timestamp">
-                      <button
-                        className="time-button"
-                        onClick={() => setEditing(vod)}
-                        title={`Change ${vod.channel} timestamp`}
-                      >
-                        {formatTime(match.offsetSeconds)}
-                      </button>
-                      <small>
-                        {match.state === 'before'
-                          ? 'VOD start'
-                          : match.state === 'ended'
-                            ? 'VOD end'
-                            : `of ${formatTime(vod.durationSeconds)}`}
-                      </small>
-                    </div>
-                    <div className="row-actions">
-                      <button
-                        className="icon-button"
-                        aria-label={`Copy ${vod.channel} link`}
-                        title="Copy timestamp link"
-                        onClick={() =>
-                          copy(
-                            `${match.url}${match.state === 'playing' ? '' : `\n${matchDescription(match)}`}`,
-                            vodKey(vod),
-                          )
-                        }
-                      >
-                        {copied === vodKey(vod) ? <Check size={16} /> : <Copy size={16} />}
-                      </button>
-                      <a
-                        className="icon-button"
-                        href={match.url}
-                        target="_blank"
-                        rel="noreferrer"
-                        aria-label={`Open ${vod.channel} VOD`}
-                        title={
-                          match.state === 'playing'
-                            ? 'Open matching timestamp'
-                            : 'Open recording boundary (no match)'
-                        }
-                      >
-                        <ExternalLink size={16} />
-                      </a>
-                      <button
-                        className="icon-button"
-                        onClick={() => setEditing(vod)}
-                        aria-label={`Settings for ${vod.channel}`}
-                      >
-                        <SlidersHorizontal size={16} />
-                      </button>
-                      <button
-                        className="icon-button"
-                        onClick={() => remove(vod)}
-                        disabled={busy}
-                        aria-label={`Remove ${vod.channel}`}
-                      >
-                        <X size={17} />
-                      </button>
-                    </div>
-                  </article>
-                );
-              })}
-            </div>
-          </section>
         )}
       </main>
       {!!vods.length && (
@@ -782,9 +653,9 @@ export default function App() {
               that cover the selected moment.
             </p>
             <p>
-              <strong>Links:</strong> every recording is listed. Non-matches show how far before or
-              after the selected moment they fall. Use a recording’s settings to change its
-              timestamp or correct a fixed delay.
+              <strong>Timestamp links:</strong> use the go-to icon next to a timeline timestamp or
+              above a player. Hide or show the timeline with its toggle; playback continues. Use a
+              recording’s settings to change its timestamp or correct a fixed delay.
             </p>
             <p>
               Watch mode hides setup controls; Escape leaves it. Ads and buffering can shift

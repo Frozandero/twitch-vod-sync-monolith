@@ -7,15 +7,15 @@ Sync Twitch recordings in a grid, seek a shared timeline, and get timestamp link
 ## Use
 
 1. Paste Twitch VOD URLs, numeric IDs, timestamped URLs, or clip URLs in the input. Separate links with newlines or spaces. Enter adds them; Shift+Enter inserts a newline.
-2. In **Grid**, play or seek any player and click **Sync** in its header. The other players seek to that broadcast moment and follow its play/pause state.
-3. Click or drag the timeline to seek all recordings. Keyboard arrows, Home, and End work too. Its range includes all recordings and gaps.
-4. **Links** lists every recording, including the one used for synchronization. Non-matches remain visible with an exact before/after gap; their links open the recording boundary.
+2. Play or seek any player and click **Sync** in its header. The other players seek to that broadcast moment and follow its play/pause state.
+3. Click or drag the timeline to seek all recordings. Keyboard arrows, Home, and End work too. Its range includes all recordings and gaps. **Hide timeline** collapses the seeker; **Show timeline** restores it without interrupting playback. This preference is saved locally.
+4. Use the go-to icon beside any timeline timestamp to open that VOD at the selected moment. Player headers also retain a link to their current playback position. These are regular links that can be copied through the browser's link menu. Non-matches are labeled with exact gaps in player overlays and timeline tooltips; their links open the recording boundary.
 5. **Watch mode** hides setup controls. Escape restores them. Each player has sync, mute, settings, open, and remove controls.
 6. A recording's settings let you enter a playback timestamp or adjust a fixed timing offset. Adding a clip or timestamped URL also selects a moment.
 
 A target that has not started pauses at zero. A finished target pauses at its end. Clip inputs resolve to their parent VOD and clip-start offset. The full metadata-entry form is deliberately absent.
 
-Sessions save locally. Share them by URL or import/export JSON through the more-options menu. Existing version-1 sessions migrate automatically.
+Sessions save locally. Share them by URL or import/export JSON through the more-options menu. Existing version-1 sessions migrate automatically. Sessions previously saved in Links view now open in the grid.
 
 **Kick is deferred at the owner's request.** The web app accepts Twitch only. Experimental Kick parsing/provider research remains isolated in shared packages; it is not a shipped capability.
 

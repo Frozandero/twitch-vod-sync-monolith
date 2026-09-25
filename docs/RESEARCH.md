@@ -4,7 +4,7 @@ Research date: **2026-09-25**. Capability claims below distinguish official docu
 
 ## Current scope
 
-The owner subsequently deferred Kick and removed manual metadata entry from the requested interface. The release is Twitch-only with a compact grid, all-recording link list, per-player controls, watch mode, and a shared seeker. Kick findings below are retained as research, not a claim of shipped support.
+The owner subsequently deferred Kick, removed manual metadata entry, and replaced the separate Links view with timestamp links in the timeline. The release is Twitch-only with a compact grid, per-player controls and links, watch mode, and a collapsible shared seeker. Kick findings below are retained as research, not a claim of shipped support.
 
 ## Feasibility decision
 

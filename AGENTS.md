@@ -19,7 +19,7 @@ Read README.md and docs/ARCHITECTURE.md before changing behavior. Read docs/RESE
 - Never put tokens, client secrets, cookies, or credentials in source, builds, logs, URLs, or shared sessions. The public Twitch client ID is an identifier, not a secret.
 - Treat shared sessions and provider responses as untrusted input. Validate all data and URL hosts.
 - No public CORS proxies, no server requirement, no attempts to bypass login/subscription/anti-bot restrictions.
-- Keep the interface compact: no slogan/sidebar recording list or demo button, all recordings in Links, exact non-match gaps, per-player controls, watch mode, and a seekable shared timeline.
+- Keep the interface compact: no slogan/sidebar recording list, demo button, or Grid/Links tabs. Keep timestamp links in player headers and beside every timeline timestamp, exact non-match gaps, per-player controls, watch mode, and a collapsible shared seeker. Hiding the seeker must not remount players or change playback.
 - Kick code is isolated experimental research, not a shipped web capability.
 - Document changes to provider assumptions with primary sources and dated observations.
 - Future extension work belongs in `apps/extension`, consumes shared packages, and requires a separate request. Do not add extension permissions speculatively.

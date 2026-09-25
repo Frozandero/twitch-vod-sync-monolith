@@ -1,6 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { ExternalLink, RefreshCw, SlidersHorizontal, Volume2, VolumeX, X } from 'lucide-react';
-import { formatTime, matchDescription, matchMoment, vodKey, type Vod } from '@vodsync/core';
+import {
+  formatTime,
+  matchDescription,
+  matchMoment,
+  timestampUrl,
+  vodKey,
+  type Vod,
+} from '@vodsync/core';
 import { createPlayerClock } from './playerClock';
 
 export type PlayerHandle = {
@@ -80,6 +87,7 @@ export function Player({ vod, source, command, register, onSync, onRemove, onSet
   const key = vodKey(vod),
     demo = vod.provenance === 'demo';
   const match = command ? matchMoment(vod, command.moment) : null;
+  const linkOffset = match && match.state !== 'playing' ? match.offsetSeconds : current;
   const commandRef = useRef(command);
   commandRef.current = command;
   useEffect(() => {
@@ -295,10 +303,15 @@ export function Player({ vod, source, command, register, onSync, onRemove, onSet
           </button>
           <a
             className="icon-button"
-            href={match?.url || vod.url}
+            href={timestampUrl(vod, linkOffset)}
             target="_blank"
             rel="noreferrer"
             aria-label={`Open ${vod.channel} VOD`}
+            title={
+              match && match.state !== 'playing'
+                ? `Open VOD boundary · ${matchDescription(match)}`
+                : `Go to timestamp ${formatTime(linkOffset)}`
+            }
           >
             <ExternalLink size={14} />
           </a>

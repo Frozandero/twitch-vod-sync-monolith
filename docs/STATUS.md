@@ -10,8 +10,10 @@ This file records actual checks and their limits. A passing build does not prove
 
 ## Browser and deployment
 
+- Replaced Grid/Links tabs and the separate Links view with timestamp links beside every seeker row. Desktop (1440×1000) and mobile (390×844) checks covered correct mapped URLs, clickable links outside the seek overlay, before/end labels, keyboard seeking, and no horizontal page overflow. A legacy Links JSON session restored all three players into the grid.
+- Hide/Show timeline preserves the moment and mounted players, works in watch mode, and persists across reload. A real Twitch player continued advancing while collapsed. The timeline link opened the expected timestamp URL in another tab; player-header links remained visible and tracked their own playback clock. Twitch required a direct play gesture for the unmuted source during this check.
 - Removed the demo entry button and bundled sample session at the owner's request. The empty view was checked at desktop and mobile sizes; existing saved/imported demo sessions remain readable.
-- Tested at 1440×1000 desktop and 390×844 mobile: all-recording link rows, before/after labels, timeline pointer seeking, Home/End, exact-end states, recording timestamp settings, watch mode, Escape, and no page-level horizontal overflow.
+- Earlier release checks at 1440×1000 desktop and 390×844 mobile covered the former all-recording Links view, before/after labels, timeline pointer seeking, Home/End, exact-end states, recording timestamp settings, watch mode, Escape, and no page-level horizontal overflow.
 - Live browser metadata resolved Twitch VODs `2882012892` and `2882074717`. A source time of `02:00:00` matched `00:46:07` in the second VOD. The official embeds played at these positions, and shared pause/watch-mode controls were exercised.
 - A real Twitch clip with a five-second local offset resolved to parent VOD `2877735401` at `09:47:17`. All three records remained visible; an unsupported URL produced an error without losing them. Share clipboard feedback was verified.
 - JSON export/import followed by an immediate reload exposed a persistence debounce race. Persistence now writes immediately instead of waiting 200 ms; the full export/import/immediate-reload browser check passed on rerun.

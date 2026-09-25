@@ -6,7 +6,7 @@ An npm-workspace monorepo builds static HTML/CSS/JavaScript with Vite into `apps
 
 - `@vodsync/core`: validated URL parsing, timestamps, UTC arithmetic, before/playing/ended states, canonical links, versioned sessions. No third-party dependencies; reusable by an extension.
 - `@vodsync/providers`: optional official Twitch Helix and anonymous Twitch GraphQL adapters. Fetch is injectable for deterministic tests. Requests time out and omit cookies. An experimental Kick adapter remains isolated, unreachable from the Twitch-only web entry point.
-- `@vodsync/web`: compact URL input, player grid, all-recording links, shared seeker, per-recording controls, watch mode, local persistence and OAuth.
+- `@vodsync/web`: compact URL input, player grid, timestamp links in each player header and timeline row, collapsible shared seeker, per-recording controls, watch mode, local persistence and OAuth.
 
 ## Time model
 
@@ -28,7 +28,7 @@ A sync command contains the UTC moment, play/pause state, last selected player k
 
 Twitch READY gates commands. The initial embed URL also includes the desired time because READY may precede loaded media. Requested seeks have bounded retries; this is not continuous drift correction. Unmount removes listeners/iframes. Loading failures and playback-blocked events are surfaced.
 
-The timeline follows the last synced player's clock while it plays. Reading clocks does not issue repeated seeks. Switching to Links unmounts players. Watch mode only changes layout, preserving player instances.
+The timeline follows the last synced player's clock while it plays. Reading clocks does not issue repeated seeks. There is no separate Links view. Timeline links use the displayed shared moment; header links use the respective player's current clock. Watch mode and collapsing the seeker only change layout, preserving player instances and playback. Collapsing discards an uncommitted seek preview; its preference is saved locally.
 
 Third-party iframe controls, content restrictions, ads, buffering, and autoplay remain Twitch-controlled. Before Twitch reports a position or emits PLAYING, the header shows the requested position and disables Sync from that player. Its initial zero must not overwrite the shared moment. Once the clock is confirmed, a subsequent zero is a valid user seek.
 
@@ -36,7 +36,7 @@ Third-party iframe controls, content restrictions, ads, buffering, and autoplay 
 
 Sessions are validated before export/import:
 
-- Version 2 stores recordings, `leaderKey`, absolute `momentMs`, and view.
+- Version 2 stores recordings, `leaderKey`, absolute `momentMs`, and a legacy view field. The web app always exports `grid` and accepts older `links` sessions into the grid without losing their recordings or moment.
 - Version 1 migrates its source key/relative timestamp into the same absolute moment. The local storage key is preserved.
 - Legacy Kick entries are filtered on web import/restore; an all-Kick session is rejected.
 - Required unique identities, canonical supported-host URLs, timezone-aware dates, finite numeric bounds, a leader present in the recordings, and a moment inside the full timeline are enforced.
@@ -47,4 +47,4 @@ Local storage holds the recording session and optional public Client ID. Session
 
 ## Interface constraints
 
-Use a compact utility interface: URL input, grid/links, per-player actions, and seeker. No slogans, decorative workspace headings, sidebar recording list, manual metadata-entry form, or feature footer. Every recording appears in Links. Watch mode hides setup without requiring fullscreen permissions. Keep responsive sizing and keyboard focus visible.
+Use a compact utility interface: URL input, player grid, per-player actions, and a collapsible seeker. No view tabs, slogans, decorative workspace headings, sidebar recording list, demo button, manual metadata-entry form, or feature footer. Every recording has a timestamp link beside its timeline time; the seek overlay must not cover those links. Before/ended links explicitly identify the boundary and gap. Watch mode hides setup without requiring fullscreen permissions. Keep responsive sizing and keyboard focus visible.
