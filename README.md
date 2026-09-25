@@ -72,6 +72,8 @@ docs/                   Research, architecture, decisions, status, roadmap
 
 Pages uses **GitHub Actions** as its source. Pushes to `main` validate, build, and deploy; pull requests validate/build without deploying. The workflow derives the repository base path from GitHub. No SPA server rewrite is needed because shared state uses the URL fragment.
 
+The requested `vodsync.frozander.dev` migration is deferred until the domain's registration is restored. The app remains on its working `github.io` address. See [the custom-domain runbook](docs/DEPLOYMENT.md) for the verified settings and migration checks.
+
 A future extension belongs in `apps/extension` and can reuse both packages. None is shipped or installed. See [roadmap](docs/ROADMAP.md), [agent guidance](AGENTS.md), and [contribution guide](CONTRIBUTING.md).
 
 ## Optional official Twitch connection

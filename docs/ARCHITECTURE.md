@@ -4,6 +4,8 @@
 
 An npm-workspace monorepo builds static HTML/CSS/JavaScript with Vite into `apps/web/dist`. GitHub Actions deploys that artifact to Pages. There is no backend, proxy, service worker, database, or runtime secret.
 
+The workflow reads Pages configuration to derive Vite's base path: the repository path on `github.io`, or `/` for a custom domain. A domain migration requires GitHub Pages settings and DNS changes followed by a rebuild, not a build-output repository or a `CNAME` source file. The requested custom-domain migration is currently deferred; see [deployment](DEPLOYMENT.md).
+
 - `@vodsync/core`: validated URL parsing, timestamps, UTC arithmetic, before/playing/ended states, canonical links, versioned sessions. No third-party dependencies; reusable by an extension.
 - `@vodsync/providers`: optional official Twitch Helix and anonymous Twitch GraphQL adapters. Fetch is injectable for deterministic tests. Requests time out and omit cookies. The Kick adapter is isolated in `kick.ts`: completed VOD metadata, legacy/current ID normalization, parent-VOD clip offsets, and a bounded channel index lookup. Shared in-flight requests and a five-minute memory cache contain validated metadata, IDs, and separately allowlisted public playback sources. Media URLs never enter a Vod or session.
 - `@vodsync/web`: compact URL input, player grid, timestamp links in each player header and timeline row, collapsible shared seeker, per-recording controls, watch mode, local persistence and OAuth.

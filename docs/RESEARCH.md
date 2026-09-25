@@ -93,6 +93,8 @@ In the local app at `2026-09-23T21:45:49Z`, `twitch/aikobliss` selected `2882074
 
 [GitHub's custom Pages workflow documentation](https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages) supports building and deploying an artifact directly from a repository. Therefore a second repository or deployment submodule adds no capability for this project. A workspace monorepo keeps the web app and future extension next to shared logic, while deployment artifacts stay out of Git. Actions references are pinned to verified commit hashes.
 
+**Custom domain, checked 2026-09-25:** [GitHub's subdomain instructions](https://docs.github.com/en/pages/configuring-a-custom-domain-for-your-github-pages-site/managing-a-custom-domain-for-your-github-pages-site#configuring-a-subdomain) require the repository's custom domain to be set before pointing DNS to `<user>.github.io`, without the repository path. Custom Actions deployments ignore `CNAME` files. A temporary `vodsync.frozander.dev` setting and DNS-only Cloudflare CNAME to `frozandero.github.io` were accepted; the workflow derived `/` and deployed the root-path assets. Public DNS could not resolve the expired parent domain, preventing certificate issuance. Both settings were reverted at the owner's request. Twitch's embed parent already follows the current hostname; OAuth redirect URIs and browser storage are origin-specific. The remaining steps are in [deployment](DEPLOYMENT.md).
+
 ## Accuracy limits
 
 - Alignment assumes the VOD's recording timeline progresses continuously from its reported start. Server timestamps can differ from perceived on-stream time because of production or delivery delays.
