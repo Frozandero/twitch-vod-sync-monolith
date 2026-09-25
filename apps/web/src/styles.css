@@ -488,16 +488,18 @@ svg {
   font-size: 12px;
 }
 .timeline {
+  --timeline-margin: 8px;
+  --timeline-padding: 10px;
   --label-width: 101px;
   --time-width: 120px;
   --link-width: 28px;
   --lane-gap: 10px;
   --track-left: calc(var(--label-width) + var(--lane-gap));
   --track-right: calc(var(--time-width) + var(--link-width) + 2 * var(--lane-gap));
-  margin: 0 8px 8px;
+  margin: 0 var(--timeline-margin) 8px;
   border: 1px solid var(--line);
   background: #1b1c20;
-  padding: 8px 10px 10px;
+  padding: 8px var(--timeline-padding) 10px;
   border-radius: 3px;
   flex-shrink: 0;
 }
@@ -523,23 +525,20 @@ svg {
 }
 .timeline-toggle {
   margin-left: auto;
-  font-size: 11px;
+  width: 32px;
+  height: 24px;
+  min-height: 24px;
+  padding: 0;
 }
 .timeline.collapsed {
   align-self: flex-end;
-  margin: 0 8px 2px;
+  margin: 0 calc(var(--timeline-margin) + var(--timeline-padding) + 1px) 2px;
   padding: 0;
   border: 0;
   background: none;
 }
 .timeline.collapsed .timeline-toolbar {
   margin-bottom: 0;
-}
-.timeline.collapsed .timeline-toggle {
-  width: 32px;
-  height: 24px;
-  min-height: 24px;
-  padding: 0;
 }
 .timeline-ruler {
   display: flex;
@@ -797,9 +796,13 @@ svg {
   aspect-ratio: auto;
   min-height: 300px;
 }
+.watch-mode .timeline {
+  --timeline-margin: 3px;
+  --timeline-padding: 8px;
+}
 .watch-mode .timeline:not(.collapsed) {
-  margin: 0 3px 3px;
-  padding: 4px 8px 6px;
+  margin: 0 var(--timeline-margin) 3px;
+  padding: 4px var(--timeline-padding) 6px;
 }
 .watch-mode .timeline-toolbar {
   margin-bottom: 0;
@@ -999,11 +1002,13 @@ dialog::backdrop {
     min-height: 300px;
   }
   .timeline {
+    --timeline-margin: 5px;
+    --timeline-padding: 6px;
     --label-width: 70px;
     --time-width: 112px;
     --lane-gap: 7px;
-    margin: 0 5px 5px;
-    padding: 6px;
+    margin: 0 var(--timeline-margin) 5px;
+    padding: 6px var(--timeline-padding);
   }
   .timeline-toolbar time {
     font-size: 9px;

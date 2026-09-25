@@ -84,7 +84,7 @@ export function Timeline({
           </>
         )}
         <button
-          className={`${collapsed ? 'icon-button' : 'text-button'} timeline-toggle`}
+          className="icon-button timeline-toggle"
           aria-label={collapsed ? 'Show timeline' : 'Hide timeline'}
           title={collapsed ? 'Show timeline' : 'Hide timeline'}
           aria-expanded={!collapsed}
@@ -96,7 +96,6 @@ export function Timeline({
           }}
         >
           {collapsed ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-          {!collapsed && 'Hide timeline'}
         </button>
       </div>
       <div id="timeline-seeker-area" hidden={collapsed}>
