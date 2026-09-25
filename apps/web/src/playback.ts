@@ -1,10 +1,12 @@
 import { formatGap, matchMoment, type Vod } from '@vodsync/core';
+import type { SeekProgress } from './seekBarrier';
 
 export type StopReason = 'ended' | 'changed';
 export type PlaybackSnapshot = {
   status: 'loading' | 'ready' | 'before' | StopReason;
   seconds: number | null;
   paused: boolean;
+  seek?: SeekProgress;
 };
 
 type GuardedPlayer = { getVideo(): string; getEnded(): boolean; pause(): void };

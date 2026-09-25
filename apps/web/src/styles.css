@@ -381,6 +381,27 @@ svg {
 .boundary-state .button {
   pointer-events: auto;
 }
+.seek-hold {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  color: #cbdcc0;
+}
+.buffer-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 10px;
+  color: #cbdcc0;
+  font-size: 11px;
+  flex-shrink: 0;
+}
+.buffer-status > span {
+  flex: 1;
+}
+.buffer-status .text-button {
+  font-size: 11px;
+}
 .player-error {
   font-size: 11px;
   background: #302923;
@@ -787,18 +808,13 @@ svg {
   display: none;
 }
 .exit-watch {
-  position: fixed;
-  top: 44px;
-  right: 15px;
-  z-index: 8;
+  align-self: flex-end;
+  flex-shrink: 0;
+  margin: 3px 6px;
+  padding: 3px 8px;
   background: #26282feb;
-  opacity: 0.3;
   font-size: 11px;
-  min-height: 30px;
-}
-.exit-watch:hover,
-.exit-watch:focus-visible {
-  opacity: 1;
+  min-height: 24px;
 }
 .exit-watch kbd {
   font-size: 9px;
@@ -1026,10 +1042,6 @@ dialog::backdrop {
   }
   .watch-mode .player-frame {
     aspect-ratio: 16/9;
-  }
-  .exit-watch {
-    top: 40px;
-    right: 10px;
   }
   .empty-state {
     padding: 40px 15px;

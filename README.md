@@ -14,6 +14,8 @@ Sync Twitch recordings in a grid, seek a shared timeline, and get timestamp link
 6. **Watch mode** hides setup controls. Escape restores them. Each player has sync, mute, settings, open, and remove controls. **Undo** restores the last closed recording to its former position. Closing a non-source recording keeps the others playing when the selected moment still fits the remaining timeline.
 7. A recording's settings let you enter a playback timestamp or adjust a fixed timing offset. Adding a clip or timestamped URL also selects a moment.
 
+After a shared seek or Sync, all matching players stay paused until each has reached the requested position and buffered at least two seconds (or the remaining footage near its end). If playback was running, they resume together; a paused seek stays paused. A compact progress row shows how many are ready. You can change the resume choice with the timeline play/pause button, retry a stalled wait, or cancel it and leave everyone paused. Before-start and ended recordings do not hold up the wait.
+
 A target that has not started is held at zero. A finished target is held at its end with its Twitch embed removed, preventing Twitch’s Up Next countdown from starting another VOD. Seeking back recreates the original recording. Unexpected video-ID changes also stop the embed before its clock can affect synchronization.
 
 The thin timeline line is the selected broadcast moment; each player’s thicker marker shows its actual reported position. Ahead/behind labels identify drift. A green bar means the confirmed player clock is within two seconds of the selection; metadata overlap alone does not prove playback is aligned. Clip inputs resolve to their parent VOD and clip-start offset. The full metadata-entry form is deliberately absent.
@@ -27,6 +29,7 @@ Sessions save locally. Share them by URL or import/export JSON through the more-
 - Anonymous Twitch metadata uses an undocumented endpoint and can change. An optional official Twitch connection is available.
 - Expired/private VODs, missing clip parents, highlights, and uploads may not resolve. No content restrictions are bypassed.
 - Ads, buffering, stream delays, edits, and reconnect gaps can shift alignment. Sync again or adjust a known fixed offset; there is no continuous drift correction.
+- The shared seek wait uses Twitch's reported position and buffer size. It does not preload an entire recording or guarantee simultaneous frames; later stalls and autoplay restrictions remain Twitch-controlled.
 - Twitch requires a 400×300 minimum embed. Small screens have a contained player scroll area.
 - Large sessions can strain the browser. There is no visible 12-recording quota; imports/requests have a 100-item resource guard. Oversized share URLs prompt JSON export.
 

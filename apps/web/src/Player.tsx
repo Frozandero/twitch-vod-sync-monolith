@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type DragEventHandler } from 'react';
 import {
   ExternalLink,
   GripVertical,
+  LoaderCircle,
   RefreshCw,
   SlidersHorizontal,
   Volume2,
@@ -18,6 +19,7 @@ import {
 } from '@vodsync/core';
 import { createPlayerClock } from './playerClock';
 import { createVodGuard, type PlaybackSnapshot, type StopReason } from './playback';
+import { createSeekPreparation, seekPosition, type SeekState } from './seekBarrier';
 
 export type PlayerHandle = {
   getSnapshot(): PlaybackSnapshot;
@@ -32,14 +34,17 @@ type TwitchPlayer = Omit<PlayerHandle, 'getSnapshot'> & {
   getDuration(): number;
   getVideo(): string;
   getEnded(): boolean;
-  addEventListener(event: string, callback: () => void): void;
-  removeEventListener(event: string, callback: () => void): void;
+  getPlaybackStats(): { bufferSize?: number } | null;
+  addEventListener(event: string, callback: (event?: unknown) => void): void;
+  removeEventListener(event: string, callback: (event?: unknown) => void): void;
 };
 type TwitchConstructor = {
   new (element: HTMLElement, options: object): TwitchPlayer;
   READY: string;
   PLAYBACK_BLOCKED: string;
   PLAYING: string;
+  PLAY: string;
+  SEEK: string;
   ENDED: string;
 };
 declare global {
@@ -77,7 +82,13 @@ function loadSdk() {
     });
   return sdk;
 }
-export type SyncCommand = { moment: number; playing: boolean; leader: string; serial: number };
+export type SyncCommand = {
+  moment: number;
+  playing: boolean;
+  leader: string;
+  serial: number;
+  phase: 'preparing' | 'released' | 'cancelled';
+};
 type Props = {
   vod: Vod;
   source: boolean;
@@ -118,6 +129,9 @@ export function Player({
   const player = useRef<Omit<PlayerHandle, 'getSnapshot'> | null>(null);
   const clock = useRef<ReturnType<typeof createPlayerClock> | null>(null);
   const guard = useRef<ReturnType<typeof createVodGuard> | null>(null);
+  const preparation = useRef<ReturnType<typeof createSeekPreparation> | null>(null);
+  const snapshot = useRef<(() => PlaybackSnapshot) | null>(null);
+  const [seekState, setSeekState] = useState<SeekState>('seeking');
   const [stopped, setStopped] = useState<{ serial: number | undefined; reason: StopReason }>();
   const [ready, setReady] = useState(false),
     [clockReady, setClockReady] = useState(false),
@@ -128,6 +142,7 @@ export function Player({
   const key = vodKey(vod),
     demo = vod.provenance === 'demo';
   const match = matchMoment(vod, moment);
+  const holding = command?.phase === 'preparing' && match.state === 'playing';
   const blockedStatus =
     match.state !== 'playing'
       ? match.state
@@ -150,10 +165,14 @@ export function Player({
     let readyEvent: string | undefined,
       blockedEvent: string | undefined,
       playingEvent: string | undefined,
+      playEvent: string | undefined,
+      seekEvent: string | undefined,
       endedEvent: string | undefined,
       readyCallback: (() => void) | undefined,
       blockedCallback: (() => void) | undefined,
       playingCallback: (() => void) | undefined,
+      playCallback: (() => void) | undefined,
+      seekCallback: ((event?: unknown) => void) | undefined,
       endedCallback: (() => void) | undefined;
     const host = container.current;
     setReady(false);
@@ -199,7 +218,17 @@ export function Player({
         return seconds;
       };
       const handle: PlayerHandle = {
-        getSnapshot: () => ({ status: 'ready', seconds: update(), paused: !running }),
+        getSnapshot: () => ({
+          status: 'ready',
+          seconds: update(),
+          paused: !running,
+          seek: preparation.current?.sample(
+            seconds,
+            vod.durationSeconds - seconds,
+            !running,
+            performance.now(),
+          ),
+        }),
         getCurrentTime: update,
         isPaused: () => {
           update();
@@ -221,6 +250,7 @@ export function Player({
         setMuted: () => {},
       };
       player.current = handle;
+      snapshot.current = handle.getSnapshot;
       register(key, handle);
       setReady(true);
       setClockReady(true);
@@ -250,19 +280,31 @@ export function Player({
           readyEvent = PlayerClass.READY;
           blockedEvent = PlayerClass.PLAYBACK_BLOCKED;
           playingEvent = PlayerClass.PLAYING;
+          playEvent = PlayerClass.PLAY;
+          seekEvent = PlayerClass.SEEK;
           endedEvent = PlayerClass.ENDED;
           readyCallback = () => {
             if (!alive || !instance) return;
             clearTimeout(timer);
             player.current = instance;
-            register(key, {
+            const handle: PlayerHandle = {
               getSnapshot: () => {
                 if (!identity.check()) return { status: 'loading', seconds: null, paused: true };
+                const preparing =
+                  commandRef.current?.phase === 'preparing' ? preparation.current : null;
+                const seek = preparing?.sample(
+                  twitch.getCurrentTime(),
+                  twitch.getPlaybackStats()?.bufferSize,
+                  twitch.isPaused(),
+                  performance.now(),
+                );
+                if (seek?.state === 'ready' && preparing) playbackClock.seeked(preparing.target);
                 const sample = playbackClock.sample();
                 return {
                   status: sample.confirmed ? 'ready' : 'loading',
                   seconds: sample.confirmed ? sample.seconds : null,
                   paused: twitch.isPaused(),
+                  seek,
                 };
               },
               getCurrentTime: playbackClock.getCurrentTime,
@@ -277,7 +319,9 @@ export function Player({
                 twitch.play();
               },
               setMuted: (silent) => twitch.setMuted(silent),
-            });
+            };
+            snapshot.current = handle.getSnapshot;
+            register(key, handle);
             setReady(true);
             setError('');
           };
@@ -286,9 +330,24 @@ export function Player({
           };
           playingCallback = () => {
             if (!alive || !identity.check()) return;
+            if (commandRef.current?.phase === 'preparing') {
+              twitch.pause();
+              return;
+            }
             playbackClock.playing();
             setClockReady(true);
             setError('');
+          };
+          playCallback = () => {
+            if (alive && commandRef.current?.phase === 'preparing') twitch.pause();
+          };
+          seekCallback = (event) => {
+            if (!alive || !identity.check()) return;
+            const position = seekPosition(event);
+            if (position === undefined || position >= vodRef.current.durationSeconds) return;
+            if (commandRef.current?.phase === 'preparing' && !preparation.current?.seeked(position))
+              return;
+            playbackClock.seeked(position);
           };
           endedCallback = () => {
             if (alive) identity.ended();
@@ -296,6 +355,8 @@ export function Player({
           instance.addEventListener(readyEvent, readyCallback);
           instance.addEventListener(blockedEvent, blockedCallback);
           instance.addEventListener(playingEvent, playingCallback);
+          instance.addEventListener(playEvent, playCallback);
+          instance.addEventListener(seekEvent, seekCallback);
           instance.addEventListener(endedEvent, endedCallback);
           timer = setTimeout(() => {
             if (alive)
@@ -315,56 +376,104 @@ export function Player({
         instance.removeEventListener(blockedEvent, blockedCallback);
       if (instance && playingEvent && playingCallback)
         instance.removeEventListener(playingEvent, playingCallback);
+      if (instance && playEvent && playCallback)
+        instance.removeEventListener(playEvent, playCallback);
+      if (instance && seekEvent && seekCallback)
+        instance.removeEventListener(seekEvent, seekCallback);
       if (instance && endedEvent && endedCallback)
         instance.removeEventListener(endedEvent, endedCallback);
       register(key, null);
       player.current = null;
       clock.current = null;
       guard.current = null;
+      preparation.current = null;
+      snapshot.current = null;
       host?.replaceChildren();
     };
   }, [key, demo, attempt, blockedStatus]);
   useEffect(() => {
     const handle = player.current;
-    if (!ready || !handle || !command || blockedStatus) return;
-    const target = matchMoment(vod, momentRef.current);
+    if (!ready || !handle || !command || blockedStatus || command.phase === 'cancelled') return;
+    const target = matchMoment(
+      vod,
+      command.phase === 'preparing' ? command.moment : momentRef.current,
+    );
+    const pending = createSeekPreparation(
+      command.serial,
+      target.offsetSeconds,
+      vod.durationSeconds,
+    );
+    preparation.current = pending;
+    setSeekState('seeking');
     let retries = 0,
       timer: ReturnType<typeof setTimeout> | undefined;
     const move = () => {
       try {
         if (guard.current && !guard.current.check()) {
-          if (retries++ < 3) timer = setTimeout(move, 700);
+          if (retries++ < 5) timer = setTimeout(move, 1500);
           return;
         }
-        if (target.state !== 'playing' || !command.playing) handle.pause();
+        handle.pause();
         clock.current?.requested(target.offsetSeconds);
         handle.seek(target.offsetSeconds);
-        if (target.state === 'playing' && command.playing) handle.play();
+        if (commandRef.current?.phase === 'released' && commandRef.current.playing) handle.play();
         timer = setTimeout(() => {
           try {
             if (guard.current && !guard.current.check()) return;
-            const actual = handle.getCurrentTime();
-            setCurrent(clock.current?.sample().seconds ?? actual);
-            // READY can precede loaded media. Retry only this requested seek, never ongoing drift.
-            if (Math.abs(actual - target.offsetSeconds) > 3 && retries++ < 3) move();
+            const state = snapshot.current?.();
+            // An acknowledged seek can have a stale paused clock. Let its buffer fill.
+            if (state?.seek?.state === 'seeking' && retries++ < 5) move();
           } catch {
             setError('The player is not ready to seek. Press play, then sync again.');
           }
-        }, 700);
+        }, 1500);
       } catch {
         setError('The player is not ready to seek. Press play, then sync again.');
       }
     };
-    const silent = command.leader !== key;
+    const silent = command.phase === 'preparing' || command.leader !== key;
     handle.setMuted(silent);
     setMuted(silent);
     move();
-    return () => clearTimeout(timer);
-  }, [command, ready, vod.correctionSeconds, blockedStatus]);
+    return () => {
+      clearTimeout(timer);
+      if (preparation.current === pending) preparation.current = null;
+    };
+  }, [command?.serial, ready, vod.correctionSeconds, blockedStatus]);
+  useEffect(() => {
+    const handle = player.current;
+    if (!ready || !handle || !command || blockedStatus) return;
+    if (command.phase !== 'released') {
+      handle.pause();
+      return;
+    }
+    if (guard.current && !guard.current.check()) return;
+    const silent = command.leader !== key;
+    handle.setMuted(silent);
+    setMuted(silent);
+    if (!command.playing) {
+      handle.pause();
+      return;
+    }
+    // Twitch's visibility report lags iframe resizing (e.g. the wait row closing).
+    // Allow its normal visibility check to settle before requesting playback.
+    let frame: number | undefined;
+    const timer = setTimeout(() => {
+      frame = requestAnimationFrame(() => {
+        if (!guard.current || guard.current.check()) handle.play();
+      });
+    }, 500);
+    return () => {
+      clearTimeout(timer);
+      if (frame !== undefined) cancelAnimationFrame(frame);
+    };
+  }, [command?.phase, command?.serial, command?.playing, ready, blockedStatus]);
   useEffect(() => {
     if (!ready) return;
     const timer = setInterval(() => {
       try {
+        const state = snapshot.current?.();
+        if (state?.seek) setSeekState(state.seek.state);
         if (clock.current) {
           const position = clock.current.sample();
           setCurrent(position.seconds);
@@ -415,11 +524,29 @@ export function Player({
           <GripVertical size={15} />
         </button>
         <strong title={vod.title}>{vod.channel}</strong>
+        {holding && !blockedStatus && (
+          <span
+            className="seek-hold"
+            role="status"
+            title={
+              seekState === 'ready'
+                ? 'Ready · waiting for other VODs'
+                : 'Buffering selected moment…'
+            }
+            aria-label={
+              seekState === 'ready'
+                ? 'Ready · waiting for other VODs'
+                : 'Buffering selected moment…'
+            }
+          >
+            <LoaderCircle className="spin" size={14} />
+          </span>
+        )}
         <time>{formatTime(current)}</time>
         <div className="player-actions">
           <button
             className={`sync-button ${source ? 'selected' : ''}`}
-            disabled={!ready || !clockReady}
+            disabled={!ready || !clockReady || holding}
             onClick={() => onSync(vod)}
             title={
               clockReady
@@ -432,7 +559,7 @@ export function Player({
           </button>
           <button
             className="icon-button"
-            disabled={!ready}
+            disabled={!ready || holding}
             aria-label={`${muted ? 'Unmute' : 'Mute'} ${vod.channel}`}
             onClick={() => {
               player.current?.setMuted(!muted);

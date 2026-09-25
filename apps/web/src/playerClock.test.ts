@@ -29,4 +29,26 @@ describe('Twitch clock startup', () => {
     clock.playing();
     expect(() => clock.getCurrentTime()).toThrow('not reported');
   });
+
+  it('uses an acknowledged paused seek until Twitch publishes the new clock', () => {
+    let position = 50;
+    const clock = createPlayerClock(() => position, 50);
+    clock.seeked(100);
+    expect(clock.getCurrentTime()).toBe(100);
+    clock.playing();
+    expect(clock.getCurrentTime()).toBe(100);
+    position = 100.25;
+    expect(clock.getCurrentTime()).toBe(100.25);
+    position = 110;
+    expect(clock.getCurrentTime()).toBe(110);
+  });
+
+  it('accepts acknowledged zero and ignores malformed acknowledgments', () => {
+    const clock = createPlayerClock(() => 100, 100);
+    clock.seeked(0);
+    expect(clock.getCurrentTime()).toBe(0);
+    clock.seeked(NaN);
+    clock.seeked(-1);
+    expect(clock.getCurrentTime()).toBe(0);
+  });
 });

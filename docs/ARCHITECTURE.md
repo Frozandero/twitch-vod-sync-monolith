@@ -18,17 +18,21 @@ targetOffset   = sharedMoment - target effectiveStart
 
 Recording intervals are half-open: `[start,end)`. Before-start offsets clamp to zero; at/after-end offsets clamp to duration. Both remain visible and are labeled as non-matches with exact gaps. Their outbound links are explicitly boundary links, not matching footage. These states have frozen handles and no active Twitch iframe; do not seek an embed to its exact end and leave an Up Next countdown running.
 
-The shared moment is independent of the last selected player's interval. This is necessary for a seeker spanning all recordings, including gaps when none is playing. Timeline bounds are the union's earliest start and latest end. Seeker preview is local while dragging; release or a keyboard action issues a paused seek to every player.
+The shared moment is independent of the last selected player's interval. This is necessary for a seeker spanning all recordings, including gaps when none is playing. Timeline bounds are the union's earliest start and latest end. Seeker preview is local while dragging; release or a keyboard action prepares a shared seek, retaining the previous play/pause intent.
 
 GET Clips `vod_offset` and GraphQL `videoOffsetSeconds` are the clip start in the parent VOD. Add the clip-local offset; fetch the parent broadcast's start. Never use clip creation time or subtract clip duration. Reject automatic mapping of highlights/uploads.
 
 ## Player coordination
 
-A sync command contains the UTC moment, play/pause state, last selected player key, and a monotonic serial. Clicking a player's Sync reads its position and pause state. Targets seek to matching offsets; those out of bounds pause. The selected player supplies audio; mute can be adjusted separately.
+A sync command contains the UTC moment, desired play/pause state, last selected player key, monotonic serial, and preparation/release/cancellation phase. Clicking a player's Sync reads its position and pause state. Targets seek to matching offsets; those out of bounds pause. The selected player supplies audio; mute can be adjusted separately.
 
-Twitch READY gates commands. The initial embed URL also includes the desired time because READY may precede loaded media. Requested seeks have bounded retries; this is not continuous drift correction. Unmount removes listeners/iframes. Loading failures and playback-blocked events are surfaced.
+During preparation all players pause and mute, and the shared clock stays at the selected moment. Each matching player must confirm its target through a validated SEEK position or actual clock within 0.5 seconds, report a buffer of at least two seconds (or its remaining duration), and stay paused with these conditions for 500 ms. The coordinator samples all current handles and releases only when every required player reports ready for that command's serial. Before/ended intervals are excluded. A newer seek replaces the old preparation; removed recordings leave the required set. Playback resumes for all required players only if requested; otherwise they remain paused. The timeline button changes that intent while waiting. Cancel leaves everyone paused; a prolonged wait offers Retry, with no timeout that silently starts ready players alone.
+
+Twitch READY gates commands, not buffered readiness. The initial embed URL also includes the desired time because READY may precede loaded media. Unacknowledged seeks have bounded retries; once acknowledged, let the buffer fill without repeated seeks. Twitch's paused clock may lag behind SEEK's reported position, so the clock adapter retains that validated position until the raw clock catches up. Preparation listens to PLAY/PLAYING and pauses premature playback. Readiness indicators stay in headers and the shared progress row, outside the embed. Unmount removes listeners/iframes. Loading failures and playback-blocked events are surfaced. This is a seek barrier, not continuous drift correction or full-VOD preloading.
 
 The identity/end guard checks the public SDK's getVideo/getEnded before accepting positions or playback commands, and listens for ENDED. Finishing or changing identity synchronously pauses and detaches the iframe, then latches the stopped state for that command. A subsequent playable sync/seek recreates the requested VOD with the current shared moment; a changed-ID stop also offers an explicit reload. A source ending advances the selection to its exact end. Other players reaching a boundary cannot advance the source clock or resurrect a stopped embed.
+
+Released play requests allow 500 ms and a paint frame for Twitch's visibility report to catch up after resizing, including the watch-mode grid growing when the progress row closes. A newer command or cancellation cleans up that pending play. Watch-mode exit stays above the grid rather than floating over a video.
 
 The timeline follows the last synced player's clock while it plays. Reading clocks does not issue repeated seeks. There is no separate Links view. Timeline links use the displayed shared moment; header links use the respective player's current clock. Watch mode and collapsing the seeker only change layout, preserving player instances and playback. Collapsing discards an uncommitted seek preview; its preference is saved locally.
 
@@ -38,7 +42,7 @@ Session VOD array order is the grid/timeline order. Player DOM nodes stay sorted
 
 Closing a non-source player leaves playback untouched unless the shared moment must clamp to the remaining timeline. Source removal chooses a remaining source and issues a paused sync. The last closed VOD and its former index are kept transiently for Undo; restoration leaves existing players alone, while restoring an empty workspace initializes a paused session. Explicit clear/import discards this undo entry.
 
-Third-party iframe controls, content restrictions, ads, buffering, and autoplay remain Twitch-controlled. Before Twitch reports a position or emits PLAYING, the header shows the requested position and disables Sync from that player. Its initial zero must not overwrite the shared moment. Once the clock is confirmed, a subsequent zero is a valid user seek.
+Third-party iframe controls, content restrictions, ads, buffering, and autoplay remain Twitch-controlled. Before Twitch reports a position, acknowledges a seek, or emits PLAYING, the header shows the requested position and disables Sync from that player. Its initial zero must not overwrite the shared moment. A buffered preparation at zero can confirm a legitimate start position; once the clock is confirmed, a subsequent zero is also a valid user seek.
 
 ## Persistence
 

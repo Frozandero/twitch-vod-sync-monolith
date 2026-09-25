@@ -46,6 +46,7 @@ import {
 import { Player, type PlayerHandle, type SyncCommand } from './Player';
 import { Timeline } from './Timeline';
 import type { PlaybackSnapshot, StopReason } from './playback';
+import { seekBarrier } from './seekBarrier';
 import { readStorage, writeStorage } from './storage';
 
 const SESSION_KEY = 'vodsync.session.v1'; // Preserve and migrate existing workspaces.
@@ -145,7 +146,8 @@ export default function App() {
   const playerStopped = useCallback((vod: Vod, reason: StopReason) => {
     if (vodKey(vod) !== leaderRef.current) return;
     setPlaying(false);
-    if (reason === 'ended') setMoment(startMs(vod) + vod.durationSeconds * 1000);
+    if (reason === 'ended' && commandRef.current?.phase !== 'preparing')
+      setMoment(startMs(vod) + vod.durationSeconds * 1000);
   }, []);
   const [command, setCommand] = useState<SyncCommand | null>(() =>
     initial.session
@@ -154,9 +156,17 @@ export default function App() {
           playing: false,
           leader: initial.session.leaderKey,
           serial: 0,
+          phase: 'preparing',
         }
       : null,
   );
+  const commandRef = useRef(command);
+  commandRef.current = command;
+  const [seekStartedAt, setSeekStartedAt] = useState(Date.now);
+  function updateCommand(next: SyncCommand | null) {
+    commandRef.current = next;
+    setCommand(next);
+  }
   const handles = useRef(new Map<string, PlayerHandle>());
   const importInput = useRef<HTMLInputElement>(null);
   const copyTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -226,6 +236,13 @@ export default function App() {
         }
       }
       setPlaybackStates(next);
+      const active = commandRef.current;
+      if (active?.phase === 'preparing') {
+        setPlaying(false);
+        if (seekBarrier(vods, active.moment, active.serial, next).complete)
+          updateCommand({ ...active, phase: 'released' });
+        return;
+      }
       const source = vods.find((v) => vodKey(v) === leaderKey),
         state = next[leaderKey];
       setPlaying(state?.status === 'ready' && !state.paused);
@@ -243,10 +260,38 @@ export default function App() {
   }, [leaderKey, vods]);
 
   function syncTo(nextMoment: number, nextPlaying = false, leader = leaderKey) {
+    updateCommand({
+      moment: nextMoment,
+      playing: nextPlaying,
+      leader,
+      serial: ++serial.current,
+      phase: 'preparing',
+    });
+    // Freeze every existing player immediately; asynchronous readiness never moves the shared clock.
+    for (const handle of handles.current.values()) {
+      try {
+        handle.pause();
+      } catch {
+        /* A loading iframe will pause when READY arrives. */
+      }
+    }
+    setSeekStartedAt(Date.now());
     setMoment(nextMoment);
     setLeaderKey(leader);
-    setPlaying(nextPlaying);
-    setCommand({ moment: nextMoment, playing: nextPlaying, leader, serial: ++serial.current });
+    setPlaying(false);
+  }
+  function cancelSeek() {
+    const active = commandRef.current;
+    if (!active) return;
+    updateCommand({ ...active, playing: false, phase: 'cancelled' });
+    for (const handle of handles.current.values()) {
+      try {
+        handle.pause();
+      } catch {
+        /* Unavailable players remain stopped. */
+      }
+    }
+    setPlaying(false);
   }
   function loadSession(next: Session) {
     const clean = twitchSession(next);
@@ -403,7 +448,7 @@ export default function App() {
     setDraggingKey('');
     setDropKey('');
     setPlaybackStates({});
-    setCommand(null);
+    updateCommand(null);
     setLeaderKey('');
     setMoment(0);
     setFailures([]);
@@ -445,7 +490,19 @@ export default function App() {
       setNotice(messageOf(error));
     }
   }
+  function sourceIsPlaying() {
+    try {
+      return handles.current.get(leaderKey)?.isPaused() === false;
+    } catch {
+      return false;
+    }
+  }
   function playback() {
+    const active = commandRef.current;
+    if (active?.phase === 'preparing') {
+      updateCommand({ ...active, playing: !active.playing });
+      return;
+    }
     const leader =
       vods.find((v) => vodKey(v) === leaderKey && matchMoment(v, moment).state === 'playing') ??
       vods.find((v) => matchMoment(v, moment).state === 'playing');
@@ -453,9 +510,13 @@ export default function App() {
       setNotice('No recording covers this moment. Seek to a recorded part of the timeline.');
       return;
     }
-    syncTo(moment, !playing, vodKey(leader));
+    syncTo(moment, !sourceIsPlaying(), vodKey(leader));
   }
 
+  const preparing = command?.phase === 'preparing';
+  const bufferProgress = preparing
+    ? seekBarrier(vods, command.moment, command.serial, playbackStates)
+    : null;
   return (
     <div className={`app-shell ${watchMode ? 'watch-mode' : ''}`}>
       <div className="sr-only" role="status" aria-live="polite">
@@ -673,15 +734,41 @@ export default function App() {
           </div>
         )}
       </main>
+      {bufferProgress && bufferProgress.total > 0 && (
+        <div className="buffer-status" role="status">
+          <LoaderCircle className="spin" size={14} />
+          <span title={bufferProgress.waiting.map((vod) => vod.channel).join(', ')}>
+            {Date.now() - seekStartedAt > 15000 ? 'Still waiting' : 'Buffering'} ·{' '}
+            {bufferProgress.ready}/{bufferProgress.total} ready
+            {command?.playing ? ' · will resume together' : ' · staying paused'}
+          </span>
+          {Date.now() - seekStartedAt > 15000 && command && (
+            <button
+              className="text-button"
+              onClick={() => syncTo(command.moment, command.playing, command.leader)}
+            >
+              Retry
+            </button>
+          )}
+          <button className="text-button" onClick={cancelSeek}>
+            Cancel wait
+          </button>
+        </div>
+      )}
       {!!vods.length && (
         <Timeline
           vods={vods}
           moment={moment}
-          playing={playing}
+          playing={preparing ? command.playing : playing}
+          preparing={preparing}
           playbackStates={playbackStates}
           onSeek={(time) => {
             const leader = vods.find((v) => matchMoment(v, time).state === 'playing');
-            syncTo(time, false, leader ? vodKey(leader) : leaderKey);
+            syncTo(
+              time,
+              preparing ? command.playing : sourceIsPlaying(),
+              leader ? vodKey(leader) : leaderKey,
+            );
           }}
           onPlayback={playback}
           onRemove={remove}

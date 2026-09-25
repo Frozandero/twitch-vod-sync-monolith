@@ -17,6 +17,7 @@ export function Timeline({
   vods,
   moment,
   playing,
+  preparing,
   playbackStates,
   onSeek,
   onPlayback,
@@ -25,6 +26,7 @@ export function Timeline({
   vods: Vod[];
   moment: number;
   playing: boolean;
+  preparing: boolean;
   playbackStates: Record<string, PlaybackSnapshot>;
   onSeek: (moment: number) => void;
   onPlayback: () => void;
@@ -53,8 +55,24 @@ export function Timeline({
           <>
             <button
               className="icon-button"
-              aria-label={playing ? 'Pause all players' : 'Play matching players'}
-              title={playing ? 'Pause all players' : 'Play matching players'}
+              aria-label={
+                preparing
+                  ? playing
+                    ? 'Stay paused after buffering'
+                    : 'Play when all VODs are ready'
+                  : playing
+                    ? 'Pause all players'
+                    : 'Play matching players'
+              }
+              title={
+                preparing
+                  ? playing
+                    ? 'Stay paused after buffering'
+                    : 'Play when all VODs are ready'
+                  : playing
+                    ? 'Pause all players'
+                    : 'Play matching players'
+              }
               onClick={onPlayback}
             >
               {playing ? <Pause size={16} /> : <Play size={16} />}
