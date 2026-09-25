@@ -8,7 +8,7 @@ Sync Twitch recordings in a grid, seek a shared timeline, and get timestamp link
 
 1. Paste Twitch VOD URLs, numeric IDs, timestamped URLs, or clip URLs in the input. Separate links with newlines or spaces. Enter adds them; Shift+Enter inserts a newline.
 2. Play or seek any player and click **Sync** in its header. The other players seek to that broadcast moment and follow its play/pause state.
-3. Click or drag the timeline to seek all recordings. Keyboard arrows, Home, and End work too. Its range includes all recordings and gaps. **Hide timeline** collapses the seeker; **Show timeline** restores it without interrupting playback. This preference is saved locally.
+3. Click or drag the timeline to seek all recordings. Keyboard arrows, Home, and End work too. Its range includes all recordings and gaps. **Hide timeline** collapses it to a small expand button, which restores the seeker without interrupting playback. This preference is saved locally. The × beside a timeline name removes that recording from the session, just like its player’s close button.
 4. Use the go-to icon beside any timeline timestamp to open that VOD at the selected moment. Player headers also retain a link to their current playback position. These are regular links that can be copied through the browser's link menu. Non-matches are labeled with exact gaps in player overlays and timeline tooltips; their links open the recording boundary.
 5. **Watch mode** hides setup controls. Escape restores them. Each player has sync, mute, settings, open, and remove controls.
 6. A recording's settings let you enter a playback timestamp or adjust a fixed timing offset. Adding a clip or timestamped URL also selects a moment.

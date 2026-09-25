@@ -578,6 +578,7 @@ export default function App() {
             syncTo(time, false, leader ? vodKey(leader) : leaderKey);
           }}
           onPlayback={playback}
+          onRemove={remove}
         />
       )}
       {editing && (

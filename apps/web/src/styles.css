@@ -476,11 +476,20 @@ svg {
   font-size: 11px;
 }
 .timeline.collapsed {
-  padding-top: 4px;
-  padding-bottom: 4px;
+  align-self: flex-end;
+  margin: 0 8px 2px;
+  padding: 0;
+  border: 0;
+  background: none;
 }
 .timeline.collapsed .timeline-toolbar {
   margin-bottom: 0;
+}
+.timeline.collapsed .timeline-toggle {
+  width: 32px;
+  height: 24px;
+  min-height: 24px;
+  padding: 0;
 }
 .timeline-ruler {
   display: flex;
@@ -499,8 +508,20 @@ svg {
   gap: var(--lane-gap);
   min-height: 24px;
 }
-.timeline-row > span {
-  flex-shrink: 0;
+.timeline-recording {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+}
+.timeline-remove {
+  flex: 0 0 24px;
+  width: 24px;
+  height: 24px;
+  min-height: 24px;
+  padding: 3px;
+}
+.timeline-recording > span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -686,7 +707,7 @@ svg {
   aspect-ratio: auto;
   min-height: 300px;
 }
-.watch-mode .timeline {
+.watch-mode .timeline:not(.collapsed) {
   margin: 0 3px 3px;
   padding: 4px 8px 6px;
 }
@@ -905,7 +926,7 @@ dialog::backdrop {
   .timeline-toolbar > span {
     display: none;
   }
-  .timeline-row > span {
+  .timeline-recording > span {
     font-size: 10px;
   }
   .timeline-position {

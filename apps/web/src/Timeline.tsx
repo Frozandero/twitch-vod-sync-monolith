@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ChevronDown, ChevronUp, ExternalLink, Pause, Play } from 'lucide-react';
+import { ChevronDown, ChevronUp, ExternalLink, Pause, Play, X } from 'lucide-react';
 import {
   formatTime,
   matchDescription,
@@ -20,6 +20,7 @@ export function Timeline({
   playbackStates,
   onSeek,
   onPlayback,
+  onRemove,
 }: {
   vods: Vod[];
   moment: number;
@@ -27,6 +28,7 @@ export function Timeline({
   playbackStates: Record<string, PlaybackSnapshot>;
   onSeek: (moment: number) => void;
   onPlayback: () => void;
+  onRemove: (vod: Vod) => void;
 }) {
   const { min, max } = timelineBounds(vods);
   const [draft, setDraft] = useState<number | null>(null);
@@ -47,20 +49,26 @@ export function Timeline({
       aria-label="Shared broadcast timeline"
     >
       <div className="timeline-toolbar">
+        {!collapsed && (
+          <>
+            <button
+              className="icon-button"
+              aria-label={playing ? 'Pause all players' : 'Play matching players'}
+              title={playing ? 'Pause all players' : 'Play matching players'}
+              onClick={onPlayback}
+            >
+              {playing ? <Pause size={16} /> : <Play size={16} />}
+            </button>
+            <time>
+              {new Date(shown).toISOString().slice(0, 10)} <strong>{clock(shown)}</strong> UTC
+            </time>
+            <span>Drag to seek all recordings</span>
+          </>
+        )}
         <button
-          className="icon-button"
-          aria-label={playing ? 'Pause all players' : 'Play matching players'}
-          title={playing ? 'Pause all players' : 'Play matching players'}
-          onClick={onPlayback}
-        >
-          {playing ? <Pause size={16} /> : <Play size={16} />}
-        </button>
-        <time>
-          {new Date(shown).toISOString().slice(0, 10)} <strong>{clock(shown)}</strong> UTC
-        </time>
-        {!collapsed && <span>Drag to seek all recordings</span>}
-        <button
-          className="text-button timeline-toggle"
+          className={`${collapsed ? 'icon-button' : 'text-button'} timeline-toggle`}
+          aria-label={collapsed ? 'Show timeline' : 'Hide timeline'}
+          title={collapsed ? 'Show timeline' : 'Hide timeline'}
           aria-expanded={!collapsed}
           aria-controls="timeline-seeker-area"
           onClick={() => {
@@ -70,7 +78,7 @@ export function Timeline({
           }}
         >
           {collapsed ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-          {collapsed ? 'Show timeline' : 'Hide timeline'}
+          {!collapsed && 'Hide timeline'}
         </button>
       </div>
       <div id="timeline-seeker-area" hidden={collapsed}>
@@ -94,7 +102,17 @@ export function Timeline({
                 : `Selected timestamp ${formatTime(match.offsetSeconds)} · ${sync.label || 'Player within 2 seconds'}`;
             return (
               <div className={`timeline-row ${match.state}`} key={vodKey(vod)}>
-                <span title={vod.channel}>{vod.channel}</span>
+                <div className="timeline-recording">
+                  <button
+                    className="icon-button timeline-remove"
+                    aria-label={`Remove ${vod.channel}`}
+                    title={`Remove ${vod.channel} recording`}
+                    onClick={() => onRemove(vod)}
+                  >
+                    <X size={13} />
+                  </button>
+                  <span title={vod.channel}>{vod.channel}</span>
+                </div>
                 <div className="timeline-track">
                   <div
                     className={`timeline-range ${sync.state === 'aligned' ? 'active' : sync.state === 'drifted' ? 'drifted' : ''}`}
