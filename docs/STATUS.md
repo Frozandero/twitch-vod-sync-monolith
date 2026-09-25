@@ -10,6 +10,7 @@ This file records actual checks and their limits. A passing build does not prove
 
 ## Browser and deployment
 
+- Removed the demo entry button and bundled sample session at the owner's request. The empty view was checked at desktop and mobile sizes; existing saved/imported demo sessions remain readable.
 - Tested at 1440×1000 desktop and 390×844 mobile: all-recording link rows, before/after labels, timeline pointer seeking, Home/End, exact-end states, recording timestamp settings, watch mode, Escape, and no page-level horizontal overflow.
 - Live browser metadata resolved Twitch VODs `2882012892` and `2882074717`. A source time of `02:00:00` matched `00:46:07` in the second VOD. The official embeds played at these positions, and shared pause/watch-mode controls were exercised.
 - A real Twitch clip with a five-second local offset resolved to parent VOD `2877735401` at `09:47:17`. All three records remained visible; an unsupported URL produced an error without losing them. Share clipboard feedback was verified.

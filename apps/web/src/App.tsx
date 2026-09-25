@@ -44,7 +44,6 @@ import {
   restoreAuth,
   validateAuth,
 } from './auth';
-import { demoSession } from './demo';
 import { Player, type PlayerHandle, type SyncCommand } from './Player';
 import { Timeline } from './Timeline';
 import { readStorage, writeStorage } from './storage';
@@ -553,9 +552,6 @@ export default function App() {
           <div className="empty-state">
             <h1>Add Twitch recordings</h1>
             <p>Paste links above. Sync from any player, or drag the timeline to choose a moment.</p>
-            <button className="text-button" onClick={() => loadSession(demoSession)}>
-              Try a demo
-            </button>
           </div>
         ) : view === 'grid' ? (
           <div className="player-grid">

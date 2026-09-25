@@ -15,7 +15,7 @@ Sync Twitch recordings in a grid, seek a shared timeline, and get timestamp link
 
 A target that has not started pauses at zero. A finished target pauses at its end. Clip inputs resolve to their parent VOD and clip-start offset. The full metadata-entry form is deliberately absent.
 
-Sessions save locally. Share them by URL or import/export JSON through the more-options menu. The demo has clearly labeled simulated players. Existing version-1 sessions migrate automatically.
+Sessions save locally. Share them by URL or import/export JSON through the more-options menu. Existing version-1 sessions migrate automatically.
 
 **Kick is deferred at the owner's request.** The web app accepts Twitch only. Experimental Kick parsing/provider research remains isolated in shared packages; it is not a shipped capability.
 
