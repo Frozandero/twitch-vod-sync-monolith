@@ -265,6 +265,35 @@ svg {
 .player-tile.is-source {
   border-color: #728261;
 }
+.player-tile.is-dragging {
+  opacity: 0.6;
+}
+.player-tile.is-drop-target {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.is-reordering .player-frame {
+  pointer-events: none;
+}
+.reorder-handle {
+  flex: 0 0 20px;
+  width: 20px;
+  padding: 2px;
+  cursor: grab;
+}
+.reorder-handle:active {
+  cursor: grabbing;
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
 .player-heading {
   height: 36px;
   display: flex;
@@ -653,6 +682,46 @@ svg {
   color: #e3cba9;
   font-size: 12px;
   border-bottom: 1px solid #5a4930;
+}
+.undo-notice {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 2px 8px;
+  font-size: 11px;
+  background: #242820;
+  flex-shrink: 0;
+}
+.undo-notice > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.order-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.order-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.order-row > span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.order-row > select {
+  padding: 5px;
+  border: 1px solid #42454d;
+  border-radius: 3px;
+  background: #111215;
+  color: inherit;
+  font: inherit;
 }
 .lookup-errors {
   padding: 5px 14px;

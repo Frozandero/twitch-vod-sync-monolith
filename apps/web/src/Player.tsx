@@ -1,5 +1,13 @@
-import { useEffect, useRef, useState } from 'react';
-import { ExternalLink, RefreshCw, SlidersHorizontal, Volume2, VolumeX, X } from 'lucide-react';
+import { useEffect, useRef, useState, type DragEventHandler } from 'react';
+import {
+  ExternalLink,
+  GripVertical,
+  RefreshCw,
+  SlidersHorizontal,
+  Volume2,
+  VolumeX,
+  X,
+} from 'lucide-react';
 import {
   formatTime,
   matchDescription,
@@ -80,6 +88,19 @@ type Props = {
   onRemove: () => void;
   onSettings: () => void;
   onStopped: (vod: Vod, reason: StopReason) => void;
+  order: {
+    index: number;
+    count: number;
+    disabled: boolean;
+    dragging: boolean;
+    target: boolean;
+    onStart: DragEventHandler<HTMLButtonElement>;
+    onEnd: DragEventHandler<HTMLButtonElement>;
+    onOver: DragEventHandler<HTMLElement>;
+    onDrop: DragEventHandler<HTMLElement>;
+    onMove: (index: number) => void;
+    onArrange: () => void;
+  };
 };
 export function Player({
   vod,
@@ -91,6 +112,7 @@ export function Player({
   onRemove,
   onSettings,
   onStopped,
+  order,
 }: Props) {
   const container = useRef<HTMLDivElement>(null);
   const player = useRef<Omit<PlayerHandle, 'getSnapshot'> | null>(null);
@@ -356,10 +378,42 @@ export function Player({
   }, [ready]);
   return (
     <article
-      className={`player-tile ${source ? 'is-source' : ''}`}
+      className={`player-tile ${source ? 'is-source' : ''} ${order.dragging ? 'is-dragging' : ''} ${order.target ? 'is-drop-target' : ''}`}
       aria-label={`${vod.channel} player`}
+      data-vod-key={key}
+      style={{ order: order.index }}
+      onDragOver={order.onOver}
+      onDrop={order.onDrop}
     >
       <div className="player-heading">
+        <button
+          className="icon-button reorder-handle"
+          aria-label={`Reorder ${vod.channel}, position ${order.index + 1} of ${order.count}`}
+          aria-haspopup="dialog"
+          title="Drag to reorder, or click to arrange. Arrow keys move; Home/End move to first/last."
+          disabled={order.disabled}
+          draggable={!order.disabled}
+          onDragStart={order.onStart}
+          onDragEnd={order.onEnd}
+          onClick={order.onArrange}
+          onKeyDown={(event) => {
+            const position =
+              event.key === 'Home'
+                ? 0
+                : event.key === 'End'
+                  ? order.count - 1
+                  : event.key === 'ArrowLeft' || event.key === 'ArrowUp'
+                    ? order.index - 1
+                    : event.key === 'ArrowRight' || event.key === 'ArrowDown'
+                      ? order.index + 1
+                      : null;
+            if (position === null) return;
+            event.preventDefault();
+            order.onMove(position);
+          }}
+        >
+          <GripVertical size={15} />
+        </button>
         <strong title={vod.title}>{vod.channel}</strong>
         <time>{formatTime(current)}</time>
         <div className="player-actions">

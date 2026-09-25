@@ -34,6 +34,10 @@ The timeline follows the last synced player's clock while it plays. Reading cloc
 
 Each handle also exposes a transient playback snapshot. The seeker draws the selected moment separately from verified actual player clocks, marks differences above two seconds as ahead/behind, and never paints a loading, finished, or switched player as aligned. Broadcast coverage remains based on metadata and is not treated as proof of content/event alignment. Playback snapshots are not serialized into sessions.
 
+Session VOD array order is the grid/timeline order. Player DOM nodes stay sorted by stable identity; CSS order changes their visual position. React keys alone do not prevent iframe navigation when a DOM node is moved. Reordering must not issue playback commands, change the source, or move iframe DOM nodes. Header grips support desktop drag/drop, keyboard arrows/Home/End, and a position dialog for touch. Position announcements describe keyboard moves. Loaded share fragments are updated when reordering so refresh retains the new order.
+
+Closing a non-source player leaves playback untouched unless the shared moment must clamp to the remaining timeline. Source removal chooses a remaining source and issues a paused sync. The last closed VOD and its former index are kept transiently for Undo; restoration leaves existing players alone, while restoring an empty workspace initializes a paused session. Explicit clear/import discards this undo entry.
+
 Third-party iframe controls, content restrictions, ads, buffering, and autoplay remain Twitch-controlled. Before Twitch reports a position or emits PLAYING, the header shows the requested position and disables Sync from that player. Its initial zero must not overwrite the shared moment. Once the clock is confirmed, a subsequent zero is a valid user seek.
 
 ## Persistence

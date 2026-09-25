@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import {
+  ArrowLeft,
+  ArrowRight,
   Check,
   Download,
   ExternalLink,
@@ -13,6 +15,7 @@ import {
   Settings2,
   Share2,
   Trash2,
+  Undo2,
   X,
 } from 'lucide-react';
 import {
@@ -123,6 +126,11 @@ export default function App() {
   const [notice, setNotice] = useState(initial.error || '');
   const [modal, setModal] = useState<'settings' | 'help' | null>(null);
   const [editing, setEditing] = useState<Vod>();
+  const [arranging, setArranging] = useState(false);
+  const [draggingKey, setDraggingKey] = useState('');
+  const [dropKey, setDropKey] = useState('');
+  const [orderAnnouncement, setOrderAnnouncement] = useState('');
+  const [removed, setRemoved] = useState<{ vod: Vod; index: number; moment: number }>();
   const [watchMode, setWatchMode] = useState(false);
   const [auth, setAuth] = useState<TwitchAuth>();
   const [clientId, setClientId] = useState(
@@ -243,6 +251,9 @@ export default function App() {
   function loadSession(next: Session) {
     const clean = twitchSession(next);
     setVods(clean.vods);
+    setRemoved(undefined);
+    setDraggingKey('');
+    setDropKey('');
     setPlaybackStates({});
     setFailures([]);
     setNotice('');
@@ -333,22 +344,64 @@ export default function App() {
   }
   function remove(vod: Vod) {
     if (busy) return;
+    const removal = { vod, index: vods.findIndex((v) => vodKey(v) === vodKey(vod)), moment };
     const next = vods.filter((v) => vodKey(v) !== vodKey(vod));
     setVods(next);
     if (!next.length) {
       clearWorkspace();
+      setRemoved(removal);
       return;
     }
+    setRemoved(removal);
     const { min, max } = timelineBounds(next);
-    syncTo(
-      Math.max(min, Math.min(max, moment)),
-      false,
-      leaderKey === vodKey(vod) ? vodKey(next[0]) : leaderKey,
-    );
+    const nextMoment = Math.max(min, Math.min(max, moment));
+    if (leaderKey === vodKey(vod) || nextMoment !== moment)
+      syncTo(nextMoment, false, leaderKey === vodKey(vod) ? vodKey(next[0]) : leaderKey);
+  }
+  function undoRemove() {
+    if (!removed || busy) return;
+    if (vods.some((v) => vodKey(v) === vodKey(removed.vod))) {
+      setRemoved(undefined);
+      return;
+    }
+    if (vods.length >= MAX_VODS) {
+      setNotice('Remove another recording before restoring this one.');
+      return;
+    }
+    const next = [...vods];
+    next.splice(Math.min(removed.index, next.length), 0, removed.vod);
+    setVods(next);
+    if (!vods.length) syncTo(removed.moment, false, vodKey(removed.vod));
+    setRemoved(undefined);
+  }
+  function reorder(key: string, position: number) {
+    if (busy) return;
+    const from = vods.findIndex((v) => vodKey(v) === key);
+    const to = Math.max(0, Math.min(vods.length - 1, position));
+    if (from < 0 || from === to) return;
+    const next = [...vods];
+    const [vod] = next.splice(from, 1);
+    next.splice(to, 0, vod);
+    setVods(next);
+    // A loaded share takes precedence over local storage on refresh.
+    if (new URLSearchParams(location.hash.slice(1)).has('session')) {
+      try {
+        const url = new URL(location.href);
+        url.hash = `session=${encodeSession({ ...session(), vods: next })}`;
+        history.replaceState(null, '', url);
+      } catch (error) {
+        setNotice(messageOf(error));
+      }
+    }
+    setOrderAnnouncement(`${vod.channel} moved to position ${to + 1} of ${next.length}.`);
   }
   function clearWorkspace() {
     if (busy) return;
     setVods([]);
+    setRemoved(undefined);
+    setArranging(false);
+    setDraggingKey('');
+    setDropKey('');
     setPlaybackStates({});
     setCommand(null);
     setLeaderKey('');
@@ -405,6 +458,9 @@ export default function App() {
 
   return (
     <div className={`app-shell ${watchMode ? 'watch-mode' : ''}`}>
+      <div className="sr-only" role="status" aria-live="polite">
+        {orderAnnouncement}
+      </div>
       <header className="topbar">
         <a className="brand" href={import.meta.env.BASE_URL}>
           VOD <span>Sync</span>
@@ -522,6 +578,21 @@ export default function App() {
           </button>
         </div>
       )}
+      {removed && (
+        <div className="undo-notice" role="status">
+          <span>Closed {removed.vod.channel}</span>
+          <button className="text-button" onClick={undoRemove} disabled={busy}>
+            <Undo2 size={14} /> Undo
+          </button>
+          <button
+            className="icon-button"
+            aria-label="Dismiss undo"
+            onClick={() => setRemoved(undefined)}
+          >
+            <X size={14} />
+          </button>
+        </div>
+      )}
       {!!failures.length && (
         <div className="lookup-errors" role="alert">
           {failures.map((failure, i) => (
@@ -547,23 +618,58 @@ export default function App() {
             <p>Paste links above. Sync from any player, or drag the timeline to choose a moment.</p>
           </div>
         ) : (
-          <div className="player-grid">
-            {vods.map((vod) => (
-              <Player
-                key={vodKey(vod)}
-                vod={vod}
-                source={vodKey(vod) === leaderKey}
-                command={command}
-                moment={moment}
-                register={register}
-                onSync={syncFrom}
-                onStopped={playerStopped}
-                onRemove={() => remove(vod)}
-                onSettings={() => {
-                  if (!busy) setEditing(vod);
-                }}
-              />
-            ))}
+          <div className={`player-grid ${draggingKey ? 'is-reordering' : ''}`}>
+            {/* Keep iframe DOM positions stable: moving an iframe reloads Twitch even with React keys. */}
+            {[...vods]
+              .sort((a, b) => vodKey(a).localeCompare(vodKey(b)))
+              .map((vod) => (
+                <Player
+                  key={vodKey(vod)}
+                  vod={vod}
+                  source={vodKey(vod) === leaderKey}
+                  command={command}
+                  moment={moment}
+                  register={register}
+                  onSync={syncFrom}
+                  onStopped={playerStopped}
+                  order={{
+                    index: vods.indexOf(vod),
+                    count: vods.length,
+                    disabled: busy || vods.length < 2,
+                    dragging: draggingKey === vodKey(vod),
+                    target: dropKey === vodKey(vod) && draggingKey !== vodKey(vod),
+                    onStart: (event) => {
+                      event.dataTransfer.setData('text/plain', vodKey(vod));
+                      event.dataTransfer.effectAllowed = 'move';
+                      setDraggingKey(vodKey(vod));
+                      setDropKey(vodKey(vod));
+                    },
+                    onEnd: () => {
+                      setDraggingKey('');
+                      setDropKey('');
+                    },
+                    onOver: (event) => {
+                      if (!draggingKey) return;
+                      event.preventDefault();
+                      event.dataTransfer.dropEffect = 'move';
+                      setDropKey(vodKey(vod));
+                    },
+                    onDrop: (event) => {
+                      if (!draggingKey) return;
+                      event.preventDefault();
+                      reorder(draggingKey, vods.indexOf(vod));
+                      setDraggingKey('');
+                      setDropKey('');
+                    },
+                    onMove: (index) => reorder(vodKey(vod), index),
+                    onArrange: () => setArranging(true),
+                  }}
+                  onRemove={() => remove(vod)}
+                  onSettings={() => {
+                    if (!busy) setEditing(vod);
+                  }}
+                />
+              ))}
           </div>
         )}
       </main>
@@ -580,6 +686,47 @@ export default function App() {
           onPlayback={playback}
           onRemove={remove}
         />
+      )}
+      {arranging && (
+        <Modal title="Arrange recordings" close={() => setArranging(false)}>
+          <div className="order-list">
+            {vods.map((vod, index) => (
+              <div className="order-row" key={vodKey(vod)}>
+                <span title={vod.title}>{vod.channel}</span>
+                <select
+                  aria-label={`Grid position for ${vod.channel}`}
+                  value={index}
+                  disabled={busy}
+                  onChange={(event) => reorder(vodKey(vod), Number(event.target.value))}
+                >
+                  {vods.map((item, position) => (
+                    <option key={vodKey(item)} value={position}>
+                      {position + 1} of {vods.length}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  className="icon-button"
+                  aria-label={`Move ${vod.channel} earlier`}
+                  title="Move earlier"
+                  disabled={busy || index === 0}
+                  onClick={() => reorder(vodKey(vod), index - 1)}
+                >
+                  <ArrowLeft size={16} />
+                </button>
+                <button
+                  className="icon-button"
+                  aria-label={`Move ${vod.channel} later`}
+                  title="Move later"
+                  disabled={busy || index === vods.length - 1}
+                  onClick={() => reorder(vodKey(vod), index + 1)}
+                >
+                  <ArrowRight size={16} />
+                </button>
+              </div>
+            ))}
+          </div>
+        </Modal>
       )}
       {editing && (
         <Modal title={editing.channel} close={() => setEditing(undefined)}>
@@ -675,7 +822,9 @@ export default function App() {
             <p>
               <strong>Grid:</strong> seek any player, then click its Sync button. The others jump to
               the same broadcast time and follow its play/pause state. The chosen player supplies
-              audio; each player also has its own mute button.
+              audio; each player also has its own mute button. Drag a header’s grip to reorder, or
+              click it to choose a position. When the grip is focused, arrow keys move the player
+              and Home/End move it to the first/last position. Closing a recording offers Undo.
             </p>
             <p>
               <strong>Timeline:</strong> click or drag along the timeline to seek all recordings.
