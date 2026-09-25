@@ -24,8 +24,14 @@ const kick: Vod = {
 };
 const moment = momentAt(twitch, 100);
 describe('mixed provider sessions', () => {
-  it('waits for Twitch buffering without waiting for external Kick playback', () => {
-    expect(seekBarrier([twitch, kick], moment, 4, {})).toMatchObject({ total: 1, complete: false });
+  it('waits for both Twitch and Kick to buffer the current seek', () => {
+    expect(seekBarrier([twitch, kick], moment, 4, {})).toMatchObject({ total: 2, complete: false });
+    const ready = {
+      status: 'ready' as const,
+      seconds: 100,
+      paused: true,
+      seek: { serial: 4, state: 'ready' as const },
+    };
     expect(
       seekBarrier([twitch, kick], moment, 4, {
         [vodKey(twitch)]: {
@@ -35,17 +41,30 @@ describe('mixed provider sessions', () => {
           seek: { serial: 4, state: 'ready' },
         },
       }),
-    ).toMatchObject({ total: 1, complete: true });
-    expect(seekBarrier([kick], moment, 4, {})).toMatchObject({ total: 0, complete: true });
+    ).toMatchObject({ total: 2, complete: false, waiting: [kick] });
+    expect(
+      seekBarrier([twitch, kick], moment, 4, { [vodKey(twitch)]: ready, [vodKey(kick)]: ready }),
+    ).toMatchObject({ total: 2, complete: true });
+    expect(seekBarrier([kick], moment, 4, {})).toMatchObject({ total: 1, complete: false });
+    expect(seekBarrier([kick], moment, 5, { [vodKey(kick)]: ready }).complete).toBe(false);
   });
-  it('confirms only supported players and never pretends Kick is playing', () => {
+  it('requires Kick PLAYING confirmation and uses its actual clock for alignment', () => {
     const running = { status: 'ready' as const, seconds: 100, paused: false, startedSerial: 4 };
     expect(startProgress([twitch, kick], moment, 4, { [vodKey(twitch)]: running })).toMatchObject({
-      total: 1,
-      complete: true,
+      total: 2,
+      complete: false,
+      waiting: [kick],
     });
-    expect(anyPlaying([kick], moment, { [vodKey(kick)]: running })).toBe(false);
-    expect(alignment(kick, moment, running)).toEqual({ state: 'external', label: 'Link only' });
+    expect(
+      startProgress([twitch, kick], moment, 4, {
+        [vodKey(twitch)]: running,
+        [vodKey(kick)]: running,
+      }).complete,
+    ).toBe(true);
+    expect(anyPlaying([kick], moment, { [vodKey(kick)]: running })).toBe(true);
+    expect(alignment(kick, moment).state).toBe('loading');
+    expect(alignment(kick, moment, running).state).toBe('aligned');
+    expect(alignment(kick, moment, { ...running, seconds: 110 }).state).toBe('drifted');
     expect(alignment(kick, momentAt(kick, 0) - 1000).state).toBe('before');
     expect(alignment(kick, momentAt(kick, 0) + 600000).state).toBe('ended');
   });

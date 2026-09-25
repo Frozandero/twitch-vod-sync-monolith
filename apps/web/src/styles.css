@@ -364,6 +364,17 @@ svg {
   height: 100% !important;
   border: 0;
 }
+.kick-player {
+  position: absolute;
+  inset: 0;
+}
+.kick-player video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: #000;
+  object-fit: contain;
+}
 .boundary-state {
   position: absolute;
   inset: 0;

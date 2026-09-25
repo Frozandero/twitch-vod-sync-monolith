@@ -21,6 +21,7 @@ import { createPlayerClock } from './playerClock';
 import { createVodGuard, type PlaybackSnapshot, type StopReason } from './playback';
 import { createSeekPreparation, seekPosition, type SeekState } from './seekBarrier';
 import { supportsPlayback } from './capabilities';
+import { createKickPlayer } from './kickPlayer';
 
 export type PlayerHandle = {
   getSnapshot(): PlaybackSnapshot;
@@ -101,6 +102,7 @@ type Props = {
   onRemove: () => void;
   onSettings: () => void;
   onStopped: (vod: Vod, reason: StopReason) => void;
+  onDuration: (key: string, seconds: number) => void;
   workspaceControls?: ReactNode;
   order: {
     index: number;
@@ -126,6 +128,7 @@ export function Player({
   onRemove,
   onSettings,
   onStopped,
+  onDuration,
   workspaceControls,
   order,
 }: Props) {
@@ -174,6 +177,8 @@ export function Player({
   momentRef.current = moment;
   const stoppedCallback = useRef(onStopped);
   stoppedCallback.current = onStopped;
+  const durationCallback = useRef(onDuration);
+  durationCallback.current = onDuration;
   const vodRef = useRef(vod);
   vodRef.current = vod;
   useEffect(() => {
@@ -181,6 +186,7 @@ export function Player({
     let alive = true,
       instance: TwitchPlayer | undefined,
       timer: ReturnType<typeof setTimeout> | undefined;
+    let kick: ReturnType<typeof createKickPlayer> | undefined;
     let readyEvent: string | undefined,
       blockedEvent: string | undefined,
       playingEvent: string | undefined,
@@ -280,6 +286,85 @@ export function Player({
       register(key, handle);
       setReady(true);
       setClockReady(true);
+    } else if (vod.platform === 'kick' && host) {
+      setCurrent(matchMoment(vod, momentRef.current).offsetSeconds);
+      kick = createKickPlayer(
+        host,
+        vod,
+        matchMoment(vod, momentRef.current).offsetSeconds,
+        attempt > 0,
+        {
+          ready: () => {
+            if (!alive || !kick) return;
+            const media = kick;
+            const handle: PlayerHandle = {
+              ...media,
+              getSnapshot: () => {
+                const sample = media.sample();
+                return {
+                  status: sample.seconds === null ? 'loading' : 'ready',
+                  seconds: sample.seconds,
+                  paused: media.isPaused(),
+                  startedSerial: startedSerial.current,
+                  playbackBlocked: playbackBlocked.current,
+                  seek:
+                    commandRef.current?.phase === 'preparing'
+                      ? preparation.current?.sample(
+                          sample.seconds ?? NaN,
+                          sample.seconds === null ? 0 : sample.bufferSeconds,
+                          media.isPaused(),
+                          performance.now(),
+                        )
+                      : undefined,
+                };
+              },
+            };
+            player.current = handle;
+            snapshot.current = handle.getSnapshot;
+            register(key, handle);
+            setReady(true);
+          },
+          play: () => {
+            if (commandRef.current?.phase === 'preparing') kick?.pause();
+          },
+          playing: () => {
+            if (!alive) return;
+            if (commandRef.current?.phase === 'preparing') {
+              kick?.pause();
+              return;
+            }
+            startedSerial.current = commandRef.current?.serial;
+            playbackBlocked.current = false;
+            setClockReady(true);
+            setError(
+              forceMuted.current ? 'Started muted. Use the speaker button to enable sound.' : '',
+            );
+          },
+          ended: () => stop('ended'),
+          duration: (seconds) => {
+            if (alive) durationCallback.current(key, seconds);
+          },
+          muted: (value) => {
+            if (alive) setMuted(value);
+          },
+          blocked: () => {
+            if (!alive) return;
+            playbackBlocked.current = true;
+            if (commandRef.current?.phase === 'starting' && !forceMuted.current) {
+              forceMuted.current = true;
+              kick?.setMuted(true);
+              setError('Playback was blocked. Retrying muted.');
+            } else
+              setError('Playback was blocked. Press play inside this player, then Sync from it.');
+          },
+          error: (message) => {
+            if (alive) {
+              setError(message);
+              setClockReady(false);
+            }
+          },
+        },
+      );
     } else {
       loadSdk()
         .then((PlayerClass) => {
@@ -412,6 +497,7 @@ export function Player({
     return () => {
       alive = false;
       clearTimeout(timer);
+      kick?.destroy();
       if (instance && readyEvent && readyCallback)
         instance.removeEventListener(readyEvent, readyCallback);
       if (instance && blockedEvent && blockedCallback)
@@ -482,7 +568,7 @@ export function Player({
       clearTimeout(timer);
       if (preparation.current === pending) preparation.current = null;
     };
-  }, [command?.serial, ready, vod.correctionSeconds, blockedStatus]);
+  }, [command?.serial, ready, vod.correctionSeconds, vod.durationSeconds, blockedStatus]);
   useEffect(() => {
     const handle = player.current;
     if (!ready || !handle || !command || blockedStatus) return;
@@ -521,7 +607,10 @@ export function Player({
           const position = clock.current.sample();
           setCurrent(position.seconds);
           setClockReady(position.confirmed);
-        } else if (player.current) setCurrent(player.current.getCurrentTime());
+        } else if (state) {
+          if (state.seconds !== null) setCurrent(state.seconds);
+          setClockReady(state.status === 'ready');
+        }
       } catch {
         /* Loading. */
       }
@@ -567,7 +656,7 @@ export function Player({
           <GripVertical size={15} />
         </button>
         <strong title={vod.title}>{vod.channel}</strong>
-        {external && <span className="provider-label">Kick</span>}
+        {vod.platform === 'kick' && <span className="provider-label">Kick</span>}
         {holding && !blockedStatus && (
           <span className="seek-hold" role="status" title={holdLabel} aria-label={holdLabel}>
             <LoaderCircle className="spin" size={14} />
@@ -584,7 +673,7 @@ export function Player({
                 title={
                   clockReady
                     ? `Sync all players to ${vod.channel}`
-                    : 'Press play inside Twitch to enable sync from this recording'
+                    : 'Wait for the player to load, or press play to enable sync'
                 }
               >
                 <RefreshCw size={13} />
@@ -648,7 +737,7 @@ export function Player({
             <button className="text-button" onClick={onSettings}>
               Choose source timestamp
             </button>
-            <small>Kick VODs open on Kick. Embedded playback is unavailable.</small>
+            <small>In-app playback is unavailable for this recording.</small>
           </div>
         ) : demo ? (
           <div className="demo-screen">
@@ -665,7 +754,10 @@ export function Player({
             />
           </div>
         ) : (
-          <div className="twitch-embed" ref={container} />
+          <div
+            className={vod.platform === 'kick' ? 'kick-player' : 'twitch-embed'}
+            ref={container}
+          />
         )}
         {!external && blockedStatus && (
           <div className="boundary-state">

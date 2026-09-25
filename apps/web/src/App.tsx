@@ -180,6 +180,20 @@ export default function App() {
     if (handle) handles.current.set(key, handle);
     else handles.current.delete(key);
   }, []);
+  const updateDuration = useCallback((key: string, seconds: number) => {
+    if (!Number.isFinite(seconds) || seconds <= 0 || seconds > 31536000) return;
+    // Kick's broadcast metadata can overestimate the finished playlist. Use the
+    // loaded media's actual end for coverage and buffer requirements.
+    setVods((current) =>
+      current.map((vod) =>
+        vod.platform === 'kick' &&
+        vodKey(vod) === key &&
+        Math.abs(vod.durationSeconds - seconds) > 0.01
+          ? { ...vod, durationSeconds: seconds }
+          : vod,
+      ),
+    );
+  }, []);
   const session = (): Session =>
     validateSession({ version: 2, vods, leaderKey, momentMs: moment, view: 'grid' });
 
@@ -215,6 +229,14 @@ export default function App() {
     }
   }, [vods, leaderKey, moment]);
   useEffect(() => () => clearTimeout(copyTimer.current), []);
+  useEffect(() => {
+    if (!vods.length) return;
+    const bounds = timelineBounds(vods);
+    const clamped = Math.max(bounds.min, Math.min(bounds.max, momentRef.current));
+    // A loaded Kick playlist may end before its metadata said it did. Keep
+    // restored near-end selections valid for the seeker and session export.
+    if (clamped !== momentRef.current) syncTo(clamped, false);
+  }, [vods]);
   useEffect(() => {
     const escape = (event: KeyboardEvent) => {
       if (event.key === 'Escape') setWatchMode(false);
@@ -268,7 +290,7 @@ export default function App() {
         } else if (decision === 'failed') {
           cancelSeek();
           setNotice(
-            `Couldn’t start ${progress.waiting.map((vod) => vod.channel).join(', ')}. All players are paused. Press play inside the affected Twitch player, then Sync from it.`,
+            `Couldn’t start ${progress.waiting.map((vod) => vod.channel).join(', ')}. All players are paused. Press play inside the affected player, then Sync from it.`,
           );
         }
         return;
@@ -731,6 +753,7 @@ export default function App() {
                   register={register}
                   onSync={syncFrom}
                   onStopped={playerStopped}
+                  onDuration={updateDuration}
                   workspaceControls={
                     vod === vods[Math.min(columns, vods.length) - 1] && (
                       <>
@@ -1008,10 +1031,10 @@ export default function App() {
               small screens can scroll inside the player.
             </p>
             <p>
-              Kick recordings use timestamp links; Kick's embed does not support VOD playback. Use
-              recording settings to choose a Kick source timestamp. Some newer Kick links block
-              external metadata requests and cannot be added. Public metadata services are
-              undocumented and can change.
+              Kick VODs play here with the same sync, pause, and buffering controls. Clips select
+              their moment in the parent VOD. Playback requires a public playlist from Kick; use the
+              timestamp link if a recording cannot load. Some newer Kick links block external
+              metadata requests. Public metadata services are undocumented and can change.
             </p>
           </div>
         </Modal>

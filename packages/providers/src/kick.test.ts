@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { resolveMedia } from './index';
+import { resolveMedia, resolveKickPlayback } from './index';
 
 // Allowlisted metadata observed on Kick, 2026-09-25. No media URLs or account data.
 const oldId = '302d2f04-d05c-4fdb-86b6-57d175bb03d7';
@@ -37,6 +37,40 @@ function queue(...items: unknown[]) {
   });
 }
 describe('Kick metadata', () => {
+  it('keeps a validated public playlist transient and resolves it by exact VOD identity', async () => {
+    const source = 'https://stream.kick.com/recording/master.m3u8';
+    const fetcher = queue({ ...video, source });
+    const { vod } = await resolveMedia(url, undefined, fetcher);
+    expect(await resolveKickPlayback(vod, false, fetcher)).toBe(source);
+    expect(JSON.stringify(vod)).not.toContain('m3u8');
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+  it.each([
+    'https://evil.test/video.m3u8',
+    'https://stream.kick.com.evil.test/a.m3u8',
+    'http://stream.kick.com/a.m3u8',
+    'https://user:pass@stream.kick.com/a.m3u8',
+    'https://stream.kick.com:444/a.m3u8',
+    'javascript:alert(1)',
+    null,
+  ])('rejects unsupported playback source %s without losing timestamp matching', async (source) => {
+    const fetcher = queue({ ...video, source });
+    const { vod } = await resolveMedia(url, undefined, fetcher);
+    await expect(resolveKickPlayback(vod, false, fetcher)).rejects.toThrow(
+      'supported public video playlist',
+    );
+  });
+  it('refreshes expired sources only through the provider mapping', async () => {
+    const source = 'https://stream.kick.com/recording/master.m3u8';
+    const fetcher = queue(
+      { ...video, source },
+      new Response('{}', { status: 404 }),
+      [{ video: { uuid: oldId } }],
+      { ...video, source: source + '?updated=1' },
+    );
+    const { vod } = await resolveMedia(url, undefined, fetcher);
+    expect(await resolveKickPlayback(vod, true, fetcher)).toBe(source + '?updated=1');
+  });
   it('uses broadcast start and milliseconds, and canonicalizes obsolete IDs', async () => {
     const result = await resolveMedia(`${url}?t=10`, undefined, queue(video));
     expect(result).toMatchObject({

@@ -1,6 +1,6 @@
 # Agent guide
 
-Read README.md and docs/ARCHITECTURE.md before changing behavior. Read docs/RESEARCH.md for provider assumptions and docs/STATUS.md for verification limits. The current user-approved scope includes Twitch playback and Kick VOD/clip timestamp matching. Manual metadata-entry UI remains deferred.
+Read README.md and docs/ARCHITECTURE.md before changing behavior. Read docs/RESEARCH.md for provider assumptions and docs/STATUS.md for verification limits. The current user-approved scope includes Twitch and Kick VOD playback and clip timestamp matching. Manual metadata-entry UI remains deferred.
 
 ## Structure and commands
 
@@ -25,7 +25,8 @@ Read README.md and docs/ARCHITECTURE.md before changing behavior. Read docs/RESE
 - Keep the interface compact: no slogan/sidebar recording list, demo button, or Grid/Links tabs. Keep timestamp links in player headers and beside every timeline timestamp, exact non-match gaps, per-player controls, watch mode, and a collapsible shared seeker. Hiding the seeker must not remount players or change playback.
 - Reordering changes session order and CSS positions, never iframe DOM positions or playback commands. Keep grid/timeline order consistent and include it in persistence/share/export. Provide keyboard/touch alternatives to dragging and preserve remaining playback when closing a non-source recording.
 - Keep the user-approved grid sizing. Watch-mode exit and timeline toggle belong in an existing player header, with no empty control strips above/below the grid and no overlap over video. Do not restore automatic 16:9 row fitting without a request.
-- Kick VODs are link-only: never load a Twitch iframe for them, report a synthetic playback clock, or include them in buffer/start barriers. Resolve current/legacy IDs only through explicit provider mappings, never dates or UUID heuristics. Keep Kick API handling isolated in packages/providers/src/kick.ts.
+- Kick VODs use native video and dynamically loaded hls.js, never Twitch iframes or injected userscripts. Include matching Kick media in buffer/start barriers; require actual loaded positions, contiguous buffered ranges, and native playing events. Remove media at boundaries. Use loaded VOD duration for the end boundary; never use it to guess a recording's identity or broadcast start.
+- Resolve Kick current/legacy IDs only through explicit provider mappings, never dates or UUID heuristics. Keep Kick API handling and validated CDN source resolution isolated in packages/providers/src/kick.ts. Media URLs are transient, never session fields. Only play public provider-returned HTTPS playlists on the supported CDN; no GM requests, proxies, credential extraction, or restriction bypasses.
 - Document changes to provider assumptions with primary sources and dated observations.
 - Future extension work belongs in `apps/extension`, consumes shared packages, and requires a separate request. Do not add extension permissions speculatively.
 

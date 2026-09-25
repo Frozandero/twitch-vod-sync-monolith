@@ -1,4 +1,4 @@
 import type { Vod } from '@vodsync/core';
 
-// Kick's official embed currently plays live channels, not recordings.
-export const supportsPlayback = (vod: Vod) => vod.platform === 'twitch';
+// Kick VODs use public HLS media; Twitch uses its official player SDK.
+export const supportsPlayback = (vod: Vod) => vod.platform === 'twitch' || vod.platform === 'kick';

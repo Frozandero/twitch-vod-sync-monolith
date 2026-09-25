@@ -1,4 +1,5 @@
 import { resolveKick } from './kick';
+export { resolveKickPlayback } from './kick';
 import {
   parseMedia,
   parseTime,

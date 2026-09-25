@@ -76,12 +76,18 @@ type Cache = {
   expires: number;
   recordings: Map<string, Promise<Vod>>;
   lists: Map<string, Promise<string[]>>;
+  playback: Map<string, string>;
 };
 const caches = new WeakMap<Fetcher, Cache>();
 function cacheFor(fetcher: Fetcher) {
   let cache = caches.get(fetcher);
   if (!cache || cache.expires < Date.now()) {
-    cache = { expires: Date.now() + 300000, recordings: new Map(), lists: new Map() };
+    cache = {
+      expires: Date.now() + 300000,
+      recordings: new Map(),
+      lists: new Map(),
+      playback: new Map(),
+    };
     caches.set(fetcher, cache);
   }
   return cache;
@@ -91,7 +97,12 @@ function legacyVod(ref: MediaRef, fetcher: Fetcher): Promise<Vod> {
   const known = cache.recordings.get(ref.id);
   if (known) return known;
   const pending = kickJson(`https://kick.com/api/v1/video/${ref.id}`, fetcher)
-    .then((data) => makeVod(ref, data, false))
+    .then((data) => {
+      const vod = makeVod(ref, data, false);
+      const source = playbackSource(data.source);
+      if (source) cache.playback.set(vod.id, source);
+      return vod;
+    })
     .then((vod) => {
       cache.recordings.set(vod.id, Promise.resolve(vod));
       return vod;
@@ -164,6 +175,42 @@ async function kickVod(ref: MediaRef, fetcher: Fetcher): Promise<Vod> {
     return makeVod(ref, result?.data, true);
   }
 }
+// Public playlists observed on Kick's own CDN. Never accept a media URL from
+// an imported session, guess a CDN path, or persist it with recording data.
+function playbackSource(value: unknown): string | undefined {
+  if (typeof value !== 'string') return;
+  try {
+    const url = new URL(value);
+    if (
+      url.protocol === 'https:' &&
+      url.hostname === 'stream.kick.com' &&
+      !url.port &&
+      !url.username &&
+      !url.password &&
+      !url.hash &&
+      url.pathname.endsWith('.m3u8')
+    )
+      return url.href;
+  } catch {
+    /* Missing or unsupported public playback source. */
+  }
+}
+
+export async function resolveKickPlayback(vod: Vod, refresh = false, fetcher: Fetcher = fetch) {
+  const ref = parseMedia(vod.url);
+  if (vod.platform !== 'kick' || ref.platform !== 'kick' || ref.kind !== 'vod' || ref.id !== vod.id)
+    throw new Error('Invalid Kick recording.');
+  if (refresh) caches.delete(fetcher);
+  const resolved = await kickVod(ref, fetcher);
+  if (resolved.id !== vod.id) throw new Error('Kick returned a different recording.');
+  const source = cacheFor(fetcher).playback.get(resolved.id);
+  if (!source)
+    throw new Error(
+      'Kick did not provide a supported public video playlist. Open the VOD on Kick.',
+    );
+  return source;
+}
+
 export async function resolveKick(ref: MediaRef, fetcher: Fetcher): Promise<ResolvedMedia> {
   if (ref.kind === 'vod')
     return { vod: await kickVod(ref, fetcher), offsetSeconds: ref.offsetSeconds };

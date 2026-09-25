@@ -2,7 +2,7 @@
 
 **[Open the app](https://frozandero.github.io/twitch-vod-sync-monolith/)**
 
-Sync Twitch recordings in a grid, match Twitch and Kick VODs/clips on a shared timeline, and open timestamp links. Static React/TypeScript app deployed to GitHub Pages; no backend or installation.
+Sync Twitch and Kick recordings in a grid, resolve clips on a shared timeline, and open timestamp links. Static React/TypeScript app deployed to GitHub Pages; no backend or installation.
 
 ## Use
 
@@ -24,7 +24,7 @@ The thin timeline line is the selected broadcast moment; each player’s thicker
 
 Sessions save locally. Share them by URL or import/export JSON through the more-options menu. Existing version-1 sessions migrate automatically. Sessions previously saved in Links view now open in the grid.
 
-**Kick uses timestamp links, not embedded playback.** Add current or legacy Kick VOD URLs and `/channel/clips/clip_…` or `?clip=clip_…` links. Clips resolve to their parent recording at the clip's start offset. Kick cards and timeline rows link to the selected timestamp; use **Choose source timestamp** to match from a Kick recording. Mixed and Kick-only sessions save/share normally. Kick never participates in Twitch's buffering/start wait or displays a verified playback marker.
+**Kick VODs play in the grid.** Add current or legacy Kick VOD URLs and `/channel/clips/clip_…` or `?clip=clip_…` links. Clips load their parent recording at the clip's start offset. Kick uses a native video player with adaptive HLS quality and participates in shared seeking, buffering, confirmed starts, and actual-clock markers. Mixed and Kick-only sessions save/share normally. No userscript or extension is needed. If public playback is unavailable, the timestamp link still opens the recording on Kick.
 
 Current Kick VOD IDs are resolved through explicit mappings in Kick's older public metadata service. The app checks up to 50 recent channel recordings, reuses concurrent lookups, and caches metadata for five minutes. Older or unindexed recordings may fail because Kick's newer service blocks cross-origin browser requests. Missing parents, private/expired recordings, and incomplete broadcasts produce an error; there is no proxy or guessed broadcast date.
 
@@ -33,7 +33,8 @@ Current Kick VOD IDs are resolved through explicit mappings in Kick's older publ
 - Anonymous Twitch metadata uses an undocumented endpoint and can change. An optional official Twitch connection is available.
 - Expired/private VODs, missing clip parents, highlights, and uploads may not resolve. No content restrictions are bypassed.
 - Ads, buffering, stream delays, edits, and reconnect gaps can shift alignment. Sync again or adjust a known fixed offset; there is no continuous drift correction.
-- The shared seek wait uses Twitch's reported position and buffer size. It does not preload an entire recording or guarantee simultaneous frames; later stalls and autoplay restrictions remain Twitch-controlled.
+- The shared seek wait uses Twitch's reported position/buffer and Kick's actual media position/buffered ranges. It does not preload an entire recording or guarantee simultaneous frames; later stalls and browser autoplay restrictions can still occur.
+- Kick playback depends on its undocumented public metadata and CORS-enabled video CDN. The loaded playlist's duration replaces the broadcast duration when they differ. This corrects the end boundary, not missing footage or gaps inside a recording.
 - Twitch requires a 400×300 minimum embed. Small screens have a contained player scroll area.
 - Large sessions can strain the browser. There is no visible 12-recording quota; imports/requests have a 100-item resource guard. Oversized share URLs prompt JSON export.
 
@@ -56,7 +57,7 @@ npm run check
 A single npm-workspace monorepo builds directly to a GitHub Pages artifact. A separate Pages repository/submodule is unnecessary and would add pointer/deployment-credential maintenance. This follows the alternative allowed in the original project request. See [ADR 001](docs/adr/001-monorepo-pages.md).
 
 ```text
-apps/web/               UI, Twitch player, optional OAuth
+apps/web/               UI, Twitch/Kick players, optional OAuth
 packages/sync-core/     Pure URL, timeline, and validated session functions
 packages/providers/     Isolated metadata adapters
 docs/                   Research, architecture, decisions, status, roadmap
@@ -77,4 +78,6 @@ No client secret is used. The browser uses Twitch's implicit grant with empty sc
 
 ## Privacy
 
-Recording metadata is stored in your browser. Metadata requests go directly to Twitch or Kick, and player requests go to Twitch; its embeds have their own cookies/network behavior. No app backend, analytics, external font service, or public CORS proxy is used. Shared sessions expose recording URLs and timing to anyone with the link, not credentials.
+Recording metadata is stored in your browser. Metadata requests go directly to Twitch or Kick; playback goes to Twitch's embed or Kick's video CDN. Twitch embeds have their own cookies/network behavior. Kick public media requests need no login. Media playlist URLs remain transient and are excluded from saved/shared sessions. No app backend, analytics, external font service, or public CORS proxy is used. Shared sessions expose recording URLs and timing to anyone with the link, not credentials.
+
+Kick playback uses [hls.js](https://github.com/video-dev/hls.js), licensed under Apache 2.0. Distributed [copyright notices](apps/web/public/licenses/hls.js.txt) and [license text](apps/web/public/licenses/Apache-2.0.txt) are included with the site.
