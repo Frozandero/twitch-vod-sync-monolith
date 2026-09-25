@@ -16,6 +16,10 @@ Both requested workflows are feasible on GitHub Pages **for Twitch**. A supporte
 
 A sync button can read a leader's position and seek the other players after converting through broadcast time. An iframe for a clip itself does not offer the same controllable playback contract; the implementation resolves the clip to its parent VOD first. The app respects Twitch's player and content restrictions.
 
+**Up Next regression, observed 2026-09-25:** the supplied session correctly identified xQc VOD `2882233662`, starting `2026-09-23T21:41:28Z` with metadata duration 33,305 seconds (9:15:05). A clean embed reported the same ID and 33,305.1 seconds. Playing through its end reproduced Twitch switching to `2882100152`. That replacement starts at `2026-09-23T18:40:46Z` and has duration 10,763 seconds (2:59:23), exactly the different duration in the user's screenshot. The previous app retained the original ID/start in its timeline while accepting the replacement's clock. This explains the misleading alignment without changing either VOD's metadata or inventing a timing correction.
+
+The documented SDK provides ENDED, getEnded, and getVideo, but does not document a switch to disable Up Next. The app therefore removes the iframe on an end event or unexpected ID, holds its logical boundary, and recreates only the original VOD on a playable seek. `autoplay: false` alone did not prevent the observed end-of-recording transition. Actual-clock markers and drift labels distinguish metadata overlap from verified playback synchronization.
+
 ## Twitch metadata and clips
 
 The official [Get Videos and Get Clips reference](https://dev.twitch.tv/docs/api/reference/) provides VOD creation time/duration/type and clips' parent `video_id` plus `vod_offset`. GET Clips defines this offset as the **start**, unlike the input to the separate Create Clip From VOD endpoint, which describes an end position. A null offset or missing parent is not recoverable from `created_at`: clip creation may happen long after the broadcast.

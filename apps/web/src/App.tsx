@@ -24,6 +24,7 @@ import {
   momentAt,
   parseMedia,
   parseTime,
+  startMs,
   timelineBounds,
   validateSession,
   vodKey,
@@ -41,6 +42,7 @@ import {
 } from './auth';
 import { Player, type PlayerHandle, type SyncCommand } from './Player';
 import { Timeline } from './Timeline';
+import type { PlaybackSnapshot, StopReason } from './playback';
 import { readStorage, writeStorage } from './storage';
 
 const SESSION_KEY = 'vodsync.session.v1'; // Preserve and migrate existing workspaces.
@@ -129,6 +131,14 @@ export default function App() {
   const [authLoading, setAuthLoading] = useState(true);
   const [copied, setCopied] = useState('');
   const [playing, setPlaying] = useState(false);
+  const [playbackStates, setPlaybackStates] = useState<Record<string, PlaybackSnapshot>>({});
+  const leaderRef = useRef(leaderKey);
+  leaderRef.current = leaderKey;
+  const playerStopped = useCallback((vod: Vod, reason: StopReason) => {
+    if (vodKey(vod) !== leaderRef.current) return;
+    setPlaying(false);
+    if (reason === 'ended') setMoment(startMs(vod) + vod.durationSeconds * 1000);
+  }, []);
   const [command, setCommand] = useState<SyncCommand | null>(() =>
     initial.session
       ? {
@@ -192,20 +202,34 @@ export default function App() {
   }, []);
   // Follow the last synced player's clock without repeatedly seeking the others.
   useEffect(() => {
+    if (!vods.length) return;
     const timer = setInterval(() => {
-      const handle = handles.current.get(leaderKey),
-        vod = vods.find((v) => vodKey(v) === leaderKey);
-      if (!handle || !vod) return;
-      try {
-        const paused = handle.isPaused();
-        setPlaying(!paused);
-        if (!paused) {
-          const time = handle.getCurrentTime();
-          if (time >= 0 && time < vod.durationSeconds) setMoment(momentAt(vod, time));
+      const next: Record<string, PlaybackSnapshot> = {};
+      for (const vod of vods) {
+        const key = vodKey(vod);
+        try {
+          next[key] = handles.current.get(key)?.getSnapshot() ?? {
+            status: 'loading',
+            seconds: null,
+            paused: true,
+          };
+        } catch {
+          next[key] = { status: 'loading', seconds: null, paused: true };
         }
-      } catch {
-        /* Player may be between readiness states. */
       }
+      setPlaybackStates(next);
+      const source = vods.find((v) => vodKey(v) === leaderKey),
+        state = next[leaderKey];
+      setPlaying(state?.status === 'ready' && !state.paused);
+      if (
+        source &&
+        state?.status === 'ready' &&
+        !state.paused &&
+        state.seconds !== null &&
+        state.seconds >= 0 &&
+        state.seconds < source.durationSeconds
+      )
+        setMoment(momentAt(source, state.seconds));
     }, 500);
     return () => clearInterval(timer);
   }, [leaderKey, vods]);
@@ -219,6 +243,7 @@ export default function App() {
   function loadSession(next: Session) {
     const clean = twitchSession(next);
     setVods(clean.vods);
+    setPlaybackStates({});
     setFailures([]);
     setNotice('');
     syncTo(clean.momentMs, false, clean.leaderKey);
@@ -324,6 +349,7 @@ export default function App() {
   function clearWorkspace() {
     if (busy) return;
     setVods([]);
+    setPlaybackStates({});
     setCommand(null);
     setLeaderKey('');
     setMoment(0);
@@ -528,8 +554,10 @@ export default function App() {
                 vod={vod}
                 source={vodKey(vod) === leaderKey}
                 command={command}
+                moment={moment}
                 register={register}
                 onSync={syncFrom}
+                onStopped={playerStopped}
                 onRemove={() => remove(vod)}
                 onSettings={() => {
                   if (!busy) setEditing(vod);
@@ -544,6 +572,7 @@ export default function App() {
           vods={vods}
           moment={moment}
           playing={playing}
+          playbackStates={playbackStates}
           onSeek={(time) => {
             const leader = vods.find((v) => matchMoment(v, time).state === 'playing');
             syncTo(time, false, leader ? vodKey(leader) : leaderKey);
@@ -650,7 +679,9 @@ export default function App() {
             <p>
               <strong>Timeline:</strong> click or drag along the timeline to seek all recordings.
               The range covers every recording, including gaps. The play button starts recordings
-              that cover the selected moment.
+              that cover the selected moment. Thin lines mark the selection; thicker markers show
+              reported player positions. Ahead/behind labels show drift; a player with no reported
+              clock is marked Not verified.
             </p>
             <p>
               <strong>Timestamp links:</strong> use the go-to icon next to a timeline timestamp or
@@ -659,9 +690,10 @@ export default function App() {
             </p>
             <p>
               Watch mode hides setup controls; Escape leaves it. Ads and buffering can shift
-              playback, so sync again when needed. Expired/private videos, missing clip parents, and
-              edited uploads may not work. Twitch players require at least 400 × 300 pixels; small
-              screens can scroll inside the player.
+              playback, so sync again when needed. Finished players are removed to stop Up Next;
+              seek earlier to replay the original VOD. Expired/private videos, missing clip parents,
+              and edited uploads may not work. Twitch players require at least 400 × 300 pixels;
+              small screens can scroll inside the player.
             </p>
             <p>
               Kick and manual metadata entry are deferred. Public Twitch lookup is undocumented and

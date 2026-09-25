@@ -13,7 +13,8 @@ Read README.md and docs/ARCHITECTURE.md before changing behavior. Read docs/RESE
 ## Invariants
 
 - A shared moment is VOD start + timing correction + playback seconds. Intervals are half-open: start is playable, exact end is ended.
-- Before-start recordings pause at zero; ended recordings pause at the end and display an ended state. Never generate a playable match for either.
+- Before-start recordings are held at zero; ended recordings are held at the end and display an ended state. Remove inactive/finished Twitch embeds so Up Next cannot start another recording; recreate only the requested VOD on a playable seek. Never generate a playable match for either boundary.
+- Guard Twitch getVideo/getEnded before accepting clocks or issuing playback commands. A foreign video ID must stop and detach the embed, never inherit the session VOD’s timing. Timeline coverage is not proof of synchronized playback: show verified player positions and drift separately from the selected moment.
 - A clip's creation/upload time is not its broadcast time. Require its parent VOD and start offset. Never subtract clip duration from GET Clips vod_offset.
 - Reject highlights/uploads for automatic wall-clock mapping. Do not restore the removed manual metadata form without a request.
 - Never put tokens, client secrets, cookies, or credentials in source, builds, logs, URLs, or shared sessions. The public Twitch client ID is an identifier, not a secret.

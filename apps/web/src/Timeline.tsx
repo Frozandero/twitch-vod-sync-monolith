@@ -10,18 +10,21 @@ import {
   type Vod,
 } from '@vodsync/core';
 import { readStorage, writeStorage } from './storage';
+import { alignment, type PlaybackSnapshot } from './playback';
 
 const clock = (ms: number) => new Date(ms).toISOString().slice(11, 19);
 export function Timeline({
   vods,
   moment,
   playing,
+  playbackStates,
   onSeek,
   onPlayback,
 }: {
   vods: Vod[];
   moment: number;
   playing: boolean;
+  playbackStates: Record<string, PlaybackSnapshot>;
   onSeek: (moment: number) => void;
   onPlayback: () => void;
 }) {
@@ -79,21 +82,48 @@ export function Timeline({
         <div className="timeline-lanes">
           {vods.map((vod) => {
             const match = matchMoment(vod, shown);
+            const playback = playbackStates[vodKey(vod)];
+            const sync = alignment(vod, shown, playback);
+            const actualMoment =
+              playback?.status === 'ready' && playback.seconds !== null
+                ? startMs(vod) + playback.seconds * 1000
+                : null;
+            const description =
+              match.state !== 'playing'
+                ? matchDescription(match)
+                : `Selected timestamp ${formatTime(match.offsetSeconds)} · ${sync.label || 'Player within 2 seconds'}`;
             return (
               <div className={`timeline-row ${match.state}`} key={vodKey(vod)}>
                 <span title={vod.channel}>{vod.channel}</span>
                 <div className="timeline-track">
                   <div
-                    className={`timeline-range ${match.state === 'playing' ? 'active' : ''}`}
+                    className={`timeline-range ${sync.state === 'aligned' ? 'active' : sync.state === 'drifted' ? 'drifted' : ''}`}
                     title={`${vod.channel}: ${clock(startMs(vod))}–${clock(startMs(vod) + vod.durationSeconds * 1000)}`}
                     style={{
                       left: `${((startMs(vod) - min) / (max - min)) * 100}%`,
                       width: `${(vod.durationSeconds / duration) * 100}%`,
                     }}
                   />
-                  <i style={{ left: `${((shown - min) / (max - min)) * 100}%` }} />
+                  <i
+                    title="Selected broadcast moment"
+                    style={{ left: `${((shown - min) / (max - min)) * 100}%` }}
+                  />
+                  {actualMoment !== null && (
+                    <b
+                      className={`actual-playhead ${sync.state}`}
+                      role="img"
+                      aria-label={`${vod.channel} player position ${formatTime(playback!.seconds!)}`}
+                      title={`Player: ${formatTime(playback!.seconds!)}${sync.label ? ` · ${sync.label}` : ''}`}
+                      style={{
+                        left: `${Math.max(0, Math.min(100, ((actualMoment - min) / (max - min)) * 100))}%`,
+                      }}
+                    />
+                  )}
                 </div>
-                <time title={matchDescription(match)}>{formatTime(match.offsetSeconds)}</time>
+                <div className={`timeline-position ${sync.state}`} title={description}>
+                  <time>{formatTime(match.offsetSeconds)}</time>
+                  {sync.label && <small>{sync.label}</small>}
+                </div>
                 <a
                   className="icon-button timeline-link"
                   href={match.url}

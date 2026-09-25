@@ -9,8 +9,10 @@ import {
   type Vod,
 } from '@vodsync/core';
 import { createPlayerClock } from './playerClock';
+import { createVodGuard, type PlaybackSnapshot, type StopReason } from './playback';
 
 export type PlayerHandle = {
+  getSnapshot(): PlaybackSnapshot;
   getCurrentTime(): number;
   isPaused(): boolean;
   seek(time: number): void;
@@ -18,8 +20,10 @@ export type PlayerHandle = {
   play(): void;
   setMuted(muted: boolean): void;
 };
-type TwitchPlayer = PlayerHandle & {
+type TwitchPlayer = Omit<PlayerHandle, 'getSnapshot'> & {
   getDuration(): number;
+  getVideo(): string;
+  getEnded(): boolean;
   addEventListener(event: string, callback: () => void): void;
   removeEventListener(event: string, callback: () => void): void;
 };
@@ -28,6 +32,7 @@ type TwitchConstructor = {
   READY: string;
   PLAYBACK_BLOCKED: string;
   PLAYING: string;
+  ENDED: string;
 };
 declare global {
   interface Window {
@@ -69,15 +74,29 @@ type Props = {
   vod: Vod;
   source: boolean;
   command: SyncCommand | null;
+  moment: number;
   register: (key: string, handle: PlayerHandle | null) => void;
   onSync: (vod: Vod) => void;
   onRemove: () => void;
   onSettings: () => void;
+  onStopped: (vod: Vod, reason: StopReason) => void;
 };
-export function Player({ vod, source, command, register, onSync, onRemove, onSettings }: Props) {
+export function Player({
+  vod,
+  source,
+  command,
+  moment,
+  register,
+  onSync,
+  onRemove,
+  onSettings,
+  onStopped,
+}: Props) {
   const container = useRef<HTMLDivElement>(null);
-  const player = useRef<PlayerHandle | null>(null);
+  const player = useRef<Omit<PlayerHandle, 'getSnapshot'> | null>(null);
   const clock = useRef<ReturnType<typeof createPlayerClock> | null>(null);
+  const guard = useRef<ReturnType<typeof createVodGuard> | null>(null);
+  const [stopped, setStopped] = useState<{ serial: number | undefined; reason: StopReason }>();
   const [ready, setReady] = useState(false),
     [clockReady, setClockReady] = useState(false),
     [error, setError] = useState(''),
@@ -86,10 +105,22 @@ export function Player({ vod, source, command, register, onSync, onRemove, onSet
     [attempt, setAttempt] = useState(0);
   const key = vodKey(vod),
     demo = vod.provenance === 'demo';
-  const match = command ? matchMoment(vod, command.moment) : null;
+  const match = matchMoment(vod, moment);
+  const blockedStatus =
+    match.state !== 'playing'
+      ? match.state
+      : stopped?.serial === command?.serial
+        ? stopped?.reason
+        : undefined;
   const linkOffset = match && match.state !== 'playing' ? match.offsetSeconds : current;
   const commandRef = useRef(command);
   commandRef.current = command;
+  const momentRef = useRef(moment);
+  momentRef.current = moment;
+  const stoppedCallback = useRef(onStopped);
+  stoppedCallback.current = onStopped;
+  const vodRef = useRef(vod);
+  vodRef.current = vod;
   useEffect(() => {
     let alive = true,
       instance: TwitchPlayer | undefined,
@@ -97,14 +128,41 @@ export function Player({ vod, source, command, register, onSync, onRemove, onSet
     let readyEvent: string | undefined,
       blockedEvent: string | undefined,
       playingEvent: string | undefined,
+      endedEvent: string | undefined,
       readyCallback: (() => void) | undefined,
       blockedCallback: (() => void) | undefined,
-      playingCallback: (() => void) | undefined;
+      playingCallback: (() => void) | undefined,
+      endedCallback: (() => void) | undefined;
     const host = container.current;
     setReady(false);
-    setClockReady(demo);
+    setClockReady(false);
     setError('');
-    if (demo) {
+    const stop = (reason: StopReason) => {
+      if (!alive) return;
+      register(key, null);
+      player.current = null;
+      setReady(false);
+      setClockReady(false);
+      setStopped({ serial: commandRef.current?.serial, reason });
+      if (reason === 'ended') setCurrent(vodRef.current.durationSeconds);
+      stoppedCallback.current(vodRef.current, reason);
+    };
+    if (blockedStatus) {
+      const seconds =
+        blockedStatus === 'ended' ? vod.durationSeconds : blockedStatus === 'before' ? 0 : null;
+      if (seconds !== null) setCurrent(seconds);
+      register(key, {
+        getSnapshot: () => ({ status: blockedStatus, seconds, paused: true }),
+        getCurrentTime: () => {
+          throw new Error('Seek to a playable moment before syncing from this recording.');
+        },
+        isPaused: () => true,
+        seek: () => {},
+        pause: () => {},
+        play: () => {},
+        setMuted: () => {},
+      });
+    } else if (demo) {
       let seconds = 0,
         running = false,
         last = performance.now();
@@ -112,10 +170,14 @@ export function Player({ vod, source, command, register, onSync, onRemove, onSet
         const now = performance.now();
         if (running) seconds = Math.min(vod.durationSeconds, seconds + (now - last) / 1000);
         last = now;
-        if (seconds >= vod.durationSeconds) running = false;
+        if (running && seconds >= vod.durationSeconds) {
+          running = false;
+          stop('ended');
+        }
         return seconds;
       };
       const handle: PlayerHandle = {
+        getSnapshot: () => ({ status: 'ready', seconds: update(), paused: !running }),
         getCurrentTime: update,
         isPaused: () => {
           update();
@@ -139,13 +201,12 @@ export function Player({ vod, source, command, register, onSync, onRemove, onSet
       player.current = handle;
       register(key, handle);
       setReady(true);
+      setClockReady(true);
     } else {
       loadSdk()
         .then((PlayerClass) => {
           if (!alive || !host) return;
-          const offset = commandRef.current
-            ? matchMoment(vod, commandRef.current.moment).offsetSeconds
-            : 0;
+          const offset = matchMoment(vod, momentRef.current).offsetSeconds;
           instance = new PlayerClass(host, {
             video: `v${vod.id}`,
             width: '100%',
@@ -156,22 +217,43 @@ export function Player({ vod, source, command, register, onSync, onRemove, onSet
             time: `${Math.floor(offset)}s`,
           });
           const twitch = instance;
-          const playbackClock = createPlayerClock(() => twitch.getCurrentTime(), offset);
+          const identity = createVodGuard(vod.id, twitch, () => host.replaceChildren(), stop);
+          guard.current = identity;
+          const playbackClock = createPlayerClock(() => {
+            identity.assertCurrent();
+            return twitch.getCurrentTime();
+          }, offset);
           clock.current = playbackClock;
           setCurrent(offset);
           readyEvent = PlayerClass.READY;
           blockedEvent = PlayerClass.PLAYBACK_BLOCKED;
           playingEvent = PlayerClass.PLAYING;
+          endedEvent = PlayerClass.ENDED;
           readyCallback = () => {
             if (!alive || !instance) return;
             clearTimeout(timer);
             player.current = instance;
             register(key, {
+              getSnapshot: () => {
+                if (!identity.check()) return { status: 'loading', seconds: null, paused: true };
+                const sample = playbackClock.sample();
+                return {
+                  status: sample.confirmed ? 'ready' : 'loading',
+                  seconds: sample.confirmed ? sample.seconds : null,
+                  paused: twitch.isPaused(),
+                };
+              },
               getCurrentTime: playbackClock.getCurrentTime,
-              isPaused: () => twitch.isPaused(),
-              seek: (time) => twitch.seek(time),
+              isPaused: () => !identity.check() || twitch.isPaused(),
+              seek: (time) => {
+                identity.assertCurrent();
+                twitch.seek(time);
+              },
               pause: () => twitch.pause(),
-              play: () => twitch.play(),
+              play: () => {
+                identity.assertCurrent();
+                twitch.play();
+              },
               setMuted: (silent) => twitch.setMuted(silent),
             });
             setReady(true);
@@ -181,14 +263,18 @@ export function Player({ vod, source, command, register, onSync, onRemove, onSet
             if (alive) setError('Press play inside the Twitch player, then sync again.');
           };
           playingCallback = () => {
-            if (!alive) return;
+            if (!alive || !identity.check()) return;
             playbackClock.playing();
             setClockReady(true);
             setError('');
           };
+          endedCallback = () => {
+            if (alive) identity.ended();
+          };
           instance.addEventListener(readyEvent, readyCallback);
           instance.addEventListener(blockedEvent, blockedCallback);
           instance.addEventListener(playingEvent, playingCallback);
+          instance.addEventListener(endedEvent, endedCallback);
           timer = setTimeout(() => {
             if (alive)
               setError('Twitch is taking too long to load. Retry or open the VOD directly.');
@@ -207,26 +293,34 @@ export function Player({ vod, source, command, register, onSync, onRemove, onSet
         instance.removeEventListener(blockedEvent, blockedCallback);
       if (instance && playingEvent && playingCallback)
         instance.removeEventListener(playingEvent, playingCallback);
+      if (instance && endedEvent && endedCallback)
+        instance.removeEventListener(endedEvent, endedCallback);
       register(key, null);
       player.current = null;
       clock.current = null;
+      guard.current = null;
       host?.replaceChildren();
     };
-  }, [key, demo, attempt]);
+  }, [key, demo, attempt, blockedStatus]);
   useEffect(() => {
     const handle = player.current;
-    if (!ready || !handle || !command) return;
-    const target = matchMoment(vod, command.moment);
+    if (!ready || !handle || !command || blockedStatus) return;
+    const target = matchMoment(vod, momentRef.current);
     let retries = 0,
       timer: ReturnType<typeof setTimeout> | undefined;
     const move = () => {
       try {
+        if (guard.current && !guard.current.check()) {
+          if (retries++ < 3) timer = setTimeout(move, 700);
+          return;
+        }
         if (target.state !== 'playing' || !command.playing) handle.pause();
         clock.current?.requested(target.offsetSeconds);
         handle.seek(target.offsetSeconds);
         if (target.state === 'playing' && command.playing) handle.play();
         timer = setTimeout(() => {
           try {
+            if (guard.current && !guard.current.check()) return;
             const actual = handle.getCurrentTime();
             setCurrent(clock.current?.sample().seconds ?? actual);
             // READY can precede loaded media. Retry only this requested seek, never ongoing drift.
@@ -244,7 +338,7 @@ export function Player({ vod, source, command, register, onSync, onRemove, onSet
     setMuted(silent);
     move();
     return () => clearTimeout(timer);
-  }, [command, ready, vod.correctionSeconds]);
+  }, [command, ready, vod.correctionSeconds, blockedStatus]);
   useEffect(() => {
     if (!ready) return;
     const timer = setInterval(() => {
@@ -338,12 +432,27 @@ export function Player({ vod, source, command, register, onSync, onRemove, onSet
         ) : (
           <div className="twitch-embed" ref={container} />
         )}
-        {match && match.state !== 'playing' && (
+        {blockedStatus && (
           <div className="boundary-state">
             <strong>
-              {match.state === 'before' ? 'This VOD hasn’t started' : 'This VOD has ended'}
+              {blockedStatus === 'before'
+                ? 'This VOD hasn’t started'
+                : blockedStatus === 'changed'
+                  ? 'Twitch tried to switch VODs'
+                  : 'This VOD has ended'}
             </strong>
-            <p>{matchDescription(match)}</p>
+            <p>
+              {blockedStatus === 'changed'
+                ? 'Playback stopped to keep the correct recording.'
+                : match.state === 'playing'
+                  ? 'Seek to an earlier moment to replay.'
+                  : matchDescription(match)}
+            </p>
+            {blockedStatus === 'changed' && (
+              <button className="button" onClick={() => setStopped(undefined)}>
+                Reload original VOD
+              </button>
+            )}
           </div>
         )}
       </div>

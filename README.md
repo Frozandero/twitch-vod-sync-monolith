@@ -13,7 +13,9 @@ Sync Twitch recordings in a grid, seek a shared timeline, and get timestamp link
 5. **Watch mode** hides setup controls. Escape restores them. Each player has sync, mute, settings, open, and remove controls.
 6. A recording's settings let you enter a playback timestamp or adjust a fixed timing offset. Adding a clip or timestamped URL also selects a moment.
 
-A target that has not started pauses at zero. A finished target pauses at its end. Clip inputs resolve to their parent VOD and clip-start offset. The full metadata-entry form is deliberately absent.
+A target that has not started is held at zero. A finished target is held at its end with its Twitch embed removed, preventing Twitch’s Up Next countdown from starting another VOD. Seeking back recreates the original recording. Unexpected video-ID changes also stop the embed before its clock can affect synchronization.
+
+The thin timeline line is the selected broadcast moment; each player’s thicker marker shows its actual reported position. Ahead/behind labels identify drift. A green bar means the confirmed player clock is within two seconds of the selection; metadata overlap alone does not prove playback is aligned. Clip inputs resolve to their parent VOD and clip-start offset. The full metadata-entry form is deliberately absent.
 
 Sessions save locally. Share them by URL or import/export JSON through the more-options menu. Existing version-1 sessions migrate automatically. Sessions previously saved in Links view now open in the grid.
 

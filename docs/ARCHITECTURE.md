@@ -16,7 +16,7 @@ sharedMoment   = selected VOD effectiveStart + playbackSeconds
 targetOffset   = sharedMoment - target effectiveStart
 ```
 
-Recording intervals are half-open: `[start,end)`. Before-start offsets clamp to zero; at/after-end offsets clamp to duration. Both remain visible and are labeled as non-matches with exact gaps. Their outbound links are explicitly boundary links, not matching footage.
+Recording intervals are half-open: `[start,end)`. Before-start offsets clamp to zero; at/after-end offsets clamp to duration. Both remain visible and are labeled as non-matches with exact gaps. Their outbound links are explicitly boundary links, not matching footage. These states have frozen handles and no active Twitch iframe; do not seek an embed to its exact end and leave an Up Next countdown running.
 
 The shared moment is independent of the last selected player's interval. This is necessary for a seeker spanning all recordings, including gaps when none is playing. Timeline bounds are the union's earliest start and latest end. Seeker preview is local while dragging; release or a keyboard action issues a paused seek to every player.
 
@@ -28,7 +28,11 @@ A sync command contains the UTC moment, play/pause state, last selected player k
 
 Twitch READY gates commands. The initial embed URL also includes the desired time because READY may precede loaded media. Requested seeks have bounded retries; this is not continuous drift correction. Unmount removes listeners/iframes. Loading failures and playback-blocked events are surfaced.
 
+The identity/end guard checks the public SDK's getVideo/getEnded before accepting positions or playback commands, and listens for ENDED. Finishing or changing identity synchronously pauses and detaches the iframe, then latches the stopped state for that command. A subsequent playable sync/seek recreates the requested VOD with the current shared moment; a changed-ID stop also offers an explicit reload. A source ending advances the selection to its exact end. Other players reaching a boundary cannot advance the source clock or resurrect a stopped embed.
+
 The timeline follows the last synced player's clock while it plays. Reading clocks does not issue repeated seeks. There is no separate Links view. Timeline links use the displayed shared moment; header links use the respective player's current clock. Watch mode and collapsing the seeker only change layout, preserving player instances and playback. Collapsing discards an uncommitted seek preview; its preference is saved locally.
+
+Each handle also exposes a transient playback snapshot. The seeker draws the selected moment separately from verified actual player clocks, marks differences above two seconds as ahead/behind, and never paints a loading, finished, or switched player as aligned. Broadcast coverage remains based on metadata and is not treated as proof of content/event alignment. Playback snapshots are not serialized into sessions.
 
 Third-party iframe controls, content restrictions, ads, buffering, and autoplay remain Twitch-controlled. Before Twitch reports a position or emits PLAYING, the header shows the requested position and disables Sync from that player. Its initial zero must not overwrite the shared moment. Once the clock is confirmed, a subsequent zero is a valid user seek.
 

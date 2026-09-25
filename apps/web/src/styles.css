@@ -349,6 +349,9 @@ svg {
   font-size: 12px;
   color: #b1a586;
 }
+.boundary-state .button {
+  pointer-events: auto;
+}
 .player-error {
   font-size: 11px;
   background: #302923;
@@ -436,7 +439,7 @@ svg {
 }
 .timeline {
   --label-width: 101px;
-  --time-width: 76px;
+  --time-width: 120px;
   --link-width: 28px;
   --lane-gap: 10px;
   --track-left: calc(var(--label-width) + var(--lane-gap));
@@ -529,6 +532,9 @@ svg {
 .timeline-range.active {
   background: #94ac7d;
 }
+.timeline-range.drifted {
+  background: #8b7048;
+}
 .timeline-track i {
   position: absolute;
   top: 0;
@@ -537,15 +543,38 @@ svg {
   background: #dcebcf;
   z-index: 1;
 }
-.timeline-row > time {
+.timeline-position {
   font: 11px var(--mono);
   flex-shrink: 0;
   color: #bfc6b7;
   text-align: right;
 }
-.timeline-row.before > time,
-.timeline-row.ended > time {
+.timeline-position time {
+  display: block;
+}
+.timeline-position small {
+  display: block;
+  font: 10px var(--mono);
+  padding-top: 2px;
+  color: #aaaeb7;
+}
+.timeline-position.drifted small,
+.timeline-position.changed small,
+.timeline-position.before,
+.timeline-position.ended {
   color: #cdb793;
+}
+.timeline-track .actual-playhead {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  width: 3px;
+  transform: translateX(-50%);
+  background: #dcab68;
+  z-index: 2;
+}
+.timeline-track .actual-playhead.aligned {
+  background: #d8efc2;
 }
 .timeline-seeker {
   position: absolute;
@@ -865,7 +894,7 @@ dialog::backdrop {
   }
   .timeline {
     --label-width: 70px;
-    --time-width: 64px;
+    --time-width: 112px;
     --lane-gap: 7px;
     margin: 0 5px 5px;
     padding: 6px;
@@ -879,7 +908,7 @@ dialog::backdrop {
   .timeline-row > span {
     font-size: 10px;
   }
-  .timeline-row > time {
+  .timeline-position {
     font-size: 10px;
   }
   .timeline-ruler {
