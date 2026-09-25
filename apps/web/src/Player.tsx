@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type DragEventHandler } from 'react';
+import { useEffect, useRef, useState, type DragEventHandler, type ReactNode } from 'react';
 import {
   ExternalLink,
   GripVertical,
@@ -100,6 +100,7 @@ type Props = {
   onRemove: () => void;
   onSettings: () => void;
   onStopped: (vod: Vod, reason: StopReason) => void;
+  workspaceControls?: ReactNode;
   order: {
     index: number;
     count: number;
@@ -124,6 +125,7 @@ export function Player({
   onRemove,
   onSettings,
   onStopped,
+  workspaceControls,
   order,
 }: Props) {
   const container = useRef<HTMLDivElement>(null);
@@ -618,6 +620,7 @@ export function Player({
           <button className="icon-button" onClick={onRemove} aria-label={`Remove ${vod.channel}`}>
             <X size={16} />
           </button>
+          {workspaceControls && <div className="workspace-controls">{workspaceControls}</div>}
         </div>
       </div>
       <div className="player-frame">

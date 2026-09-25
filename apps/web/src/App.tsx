@@ -44,12 +44,12 @@ import {
   validateAuth,
 } from './auth';
 import { Player, type PlayerHandle, type SyncCommand } from './Player';
-import { Timeline } from './Timeline';
+import { Timeline, TimelineToggle } from './Timeline';
 import type { PlaybackSnapshot, StopReason } from './playback';
 import { seekBarrier } from './seekBarrier';
 import { anyPlaying, startDecision, startProgress } from './playbackStart';
 import { readStorage, writeStorage } from './storage';
-import { useWatchLayout } from './useWatchLayout';
+import { useGridColumns } from './useGridColumns';
 
 const SESSION_KEY = 'vodsync.session.v1'; // Preserve and migrate existing workspaces.
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : 'Please retry.');
@@ -137,7 +137,10 @@ export default function App() {
   const [orderAnnouncement, setOrderAnnouncement] = useState('');
   const [removed, setRemoved] = useState<{ vod: Vod; index: number; moment: number }>();
   const [watchMode, setWatchMode] = useState(false);
-  const workspace = useWatchLayout(watchMode, vods.length);
+  const { grid, columns } = useGridColumns(vods.length);
+  const [timelineCollapsed, setTimelineCollapsed] = useState(
+    () => readStorage('vodsync.timelineCollapsed') === 'true',
+  );
   const [auth, setAuth] = useState<TwitchAuth>();
   const [clientId, setClientId] = useState(
     configuredClientId || readStorage('vodsync.clientId') || '',
@@ -634,12 +637,6 @@ export default function App() {
           </details>
         </div>
       </header>
-      {watchMode && (
-        <button className="exit-watch button" onClick={() => setWatchMode(false)}>
-          <Minimize2 size={14} />
-          Exit watch mode <kbd>Esc</kbd>
-        </button>
-      )}
       <input
         className="visually-hidden"
         ref={importInput}
@@ -724,14 +721,14 @@ export default function App() {
           </button>
         </div>
       )}
-      <main ref={workspace} className={`workspace ${!vods.length ? 'empty' : ''}`}>
+      <main className={`workspace ${!vods.length ? 'empty' : ''}`}>
         {!vods.length ? (
           <div className="empty-state">
             <h1>Add Twitch recordings</h1>
             <p>Paste links above. Sync from any player, or drag the timeline to choose a moment.</p>
           </div>
         ) : (
-          <div className={`player-grid ${draggingKey ? 'is-reordering' : ''}`}>
+          <div ref={grid} className={`player-grid ${draggingKey ? 'is-reordering' : ''}`}>
             {/* Keep iframe DOM positions stable: moving an iframe reloads Twitch even with React keys. */}
             {[...vods]
               .sort((a, b) => vodKey(a).localeCompare(vodKey(b)))
@@ -745,6 +742,29 @@ export default function App() {
                   register={register}
                   onSync={syncFrom}
                   onStopped={playerStopped}
+                  workspaceControls={
+                    vod === vods[Math.min(columns, vods.length) - 1] && (
+                      <>
+                        {watchMode && (
+                          <button
+                            className="icon-button"
+                            aria-label="Exit watch mode"
+                            title="Exit watch mode (Esc)"
+                            onClick={() => setWatchMode(false)}
+                          >
+                            <Minimize2 size={14} />
+                          </button>
+                        )}
+                        <TimelineToggle
+                          collapsed={timelineCollapsed}
+                          onToggle={() => {
+                            setTimelineCollapsed(!timelineCollapsed);
+                            writeStorage('vodsync.timelineCollapsed', String(!timelineCollapsed));
+                          }}
+                        />
+                      </>
+                    )
+                  }
                   order={{
                     index: vods.indexOf(vod),
                     count: vods.length,
@@ -820,6 +840,7 @@ export default function App() {
       )}
       {!!vods.length && (
         <Timeline
+          collapsed={timelineCollapsed}
           vods={vods}
           moment={moment}
           playing={preparing || starting ? command.playing : playing}

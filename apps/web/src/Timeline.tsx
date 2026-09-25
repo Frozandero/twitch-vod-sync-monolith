@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ChevronDown, ChevronUp, ExternalLink, Pause, Play, X } from 'lucide-react';
 import {
   formatTime,
@@ -9,10 +9,30 @@ import {
   vodKey,
   type Vod,
 } from '@vodsync/core';
-import { readStorage, writeStorage } from './storage';
 import { alignment, type PlaybackSnapshot } from './playback';
 
 const clock = (ms: number) => new Date(ms).toISOString().slice(11, 19);
+export function TimelineToggle({
+  collapsed,
+  onToggle,
+}: {
+  collapsed: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      className="icon-button timeline-toggle"
+      aria-label={collapsed ? 'Show timeline' : 'Hide timeline'}
+      title={collapsed ? 'Show timeline' : 'Hide timeline'}
+      aria-expanded={!collapsed}
+      aria-controls="timeline-seeker-area"
+      onClick={onToggle}
+    >
+      {collapsed ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+    </button>
+  );
+}
+
 export function Timeline({
   vods,
   moment,
@@ -22,6 +42,7 @@ export function Timeline({
   onSeek,
   onPlayback,
   onRemove,
+  collapsed,
 }: {
   vods: Vod[];
   moment: number;
@@ -31,12 +52,13 @@ export function Timeline({
   onSeek: (moment: number) => void;
   onPlayback: () => void;
   onRemove: (vod: Vod) => void;
+  collapsed: boolean;
 }) {
   const { min, max } = timelineBounds(vods);
   const [draft, setDraft] = useState<number | null>(null);
-  const [collapsed, setCollapsed] = useState(
-    () => readStorage('vodsync.timelineCollapsed') === 'true',
-  );
+  useEffect(() => {
+    if (collapsed) setDraft(null);
+  }, [collapsed]);
   const shown = draft ?? moment;
   const duration = (max - min) / 1000;
   function commit() {
@@ -46,10 +68,7 @@ export function Timeline({
     }
   }
   return (
-    <section
-      className={`timeline ${collapsed ? 'collapsed' : ''}`}
-      aria-label="Shared broadcast timeline"
-    >
+    <section className="timeline" aria-label="Shared broadcast timeline" hidden={collapsed}>
       <div className="timeline-toolbar">
         {!collapsed && (
           <>
@@ -83,20 +102,6 @@ export function Timeline({
             <span>Drag to seek all recordings</span>
           </>
         )}
-        <button
-          className="icon-button timeline-toggle"
-          aria-label={collapsed ? 'Show timeline' : 'Hide timeline'}
-          title={collapsed ? 'Show timeline' : 'Hide timeline'}
-          aria-expanded={!collapsed}
-          aria-controls="timeline-seeker-area"
-          onClick={() => {
-            setDraft(null);
-            setCollapsed(!collapsed);
-            writeStorage('vodsync.timelineCollapsed', String(!collapsed));
-          }}
-        >
-          {collapsed ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-        </button>
       </div>
       <div id="timeline-seeker-area" hidden={collapsed}>
         <div className="timeline-ruler">

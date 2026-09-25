@@ -321,6 +321,14 @@ svg {
   align-items: center;
   gap: 2px;
 }
+.workspace-controls {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 3px;
+  padding-left: 3px;
+  border-left: 1px solid var(--line);
+}
 .sync-button {
   height: 26px;
   min-height: 26px;
@@ -524,21 +532,10 @@ svg {
   color: #9699a2;
 }
 .timeline-toggle {
-  margin-left: auto;
   width: 32px;
   height: 24px;
   min-height: 24px;
   padding: 0;
-}
-.timeline.collapsed {
-  align-self: flex-end;
-  margin: 0 calc(var(--timeline-margin) + var(--timeline-padding) + 1px) 2px;
-  padding: 0;
-  border: 0;
-  background: none;
-}
-.timeline.collapsed .timeline-toolbar {
-  margin-bottom: 0;
 }
 .timeline-ruler {
   display: flex;
@@ -775,32 +772,32 @@ svg {
 }
 .watch-mode .workspace {
   padding: 3px;
-  flex: 1 1 0;
+  flex: 1;
+  display: flex;
   min-height: 0;
-  overflow: auto;
 }
 .watch-mode .player-grid {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
   width: 100%;
   gap: 3px;
-  align-items: flex-start;
-  align-content: flex-start;
+  align-items: stretch;
+  align-content: stretch;
+  flex: 1;
 }
 .watch-mode .player-tile {
-  flex: 0 0 min(100%, var(--watch-player-width, 100%));
+  display: flex;
+  flex-direction: column;
   border-radius: 0;
 }
 .watch-mode .player-frame {
-  aspect-ratio: 16/9;
+  flex: 1;
+  aspect-ratio: auto;
   min-height: 300px;
 }
 .watch-mode .timeline {
   --timeline-margin: 3px;
   --timeline-padding: 8px;
 }
-.watch-mode .timeline:not(.collapsed) {
+.watch-mode .timeline {
   margin: 0 var(--timeline-margin) 3px;
   padding: 4px var(--timeline-padding) 6px;
 }
@@ -809,23 +806,6 @@ svg {
 }
 .watch-mode .timeline-toolbar > span {
   display: none;
-}
-.exit-watch {
-  align-self: flex-end;
-  flex-shrink: 0;
-  margin: 3px 6px;
-  padding: 3px 8px;
-  background: #26282feb;
-  font-size: 11px;
-  min-height: 24px;
-}
-.exit-watch kbd {
-  font-size: 9px;
-  color: #a6a9b1;
-  padding: 1px 4px;
-  border: 1px solid #51535c;
-  border-radius: 2px;
-  margin-left: 4px;
 }
 .watch-mode .demo-banner {
   padding: 2px 10px;
@@ -1039,6 +1019,16 @@ dialog::backdrop {
   .lookup-errors strong {
     max-width: 100%;
   }
+  .watch-mode .workspace {
+    display: block;
+    min-height: auto;
+  }
+  .watch-mode .player-grid {
+    display: grid;
+  }
+  .watch-mode .player-frame {
+    aspect-ratio: 16/9;
+  }
   .empty-state {
     padding: 40px 15px;
   }
@@ -1061,7 +1051,7 @@ dialog::backdrop {
   flex: 0;
 }
 .watch-mode .workspace:not(.empty) {
-  flex: 1 1 0;
+  flex: 1;
 }
 @media (max-width: 700px) {
   .add-bar textarea {
