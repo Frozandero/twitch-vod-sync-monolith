@@ -47,6 +47,7 @@ import { Player, type PlayerHandle, type SyncCommand } from './Player';
 import { Timeline } from './Timeline';
 import type { PlaybackSnapshot, StopReason } from './playback';
 import { seekBarrier } from './seekBarrier';
+import { anyPlaying, startDecision, startProgress } from './playbackStart';
 import { readStorage, writeStorage } from './storage';
 
 const SESSION_KEY = 'vodsync.session.v1'; // Preserve and migrate existing workspaces.
@@ -121,6 +122,8 @@ export default function App() {
   const [vods, setVods] = useState<Vod[]>(initial.session?.vods || []);
   const [leaderKey, setLeaderKey] = useState(initial.session?.leaderKey || '');
   const [moment, setMoment] = useState(initial.session?.momentMs || 0);
+  const momentRef = useRef(moment);
+  momentRef.current = moment;
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
   const [failures, setFailures] = useState<{ input: string; error: string }[]>([]);
@@ -146,7 +149,11 @@ export default function App() {
   const playerStopped = useCallback((vod: Vod, reason: StopReason) => {
     if (vodKey(vod) !== leaderRef.current) return;
     setPlaying(false);
-    if (reason === 'ended' && commandRef.current?.phase !== 'preparing')
+    if (
+      reason === 'ended' &&
+      commandRef.current?.phase !== 'preparing' &&
+      commandRef.current?.phase !== 'starting'
+    )
       setMoment(startMs(vod) + vod.durationSeconds * 1000);
   }, []);
   const [command, setCommand] = useState<SyncCommand | null>(() =>
@@ -156,6 +163,7 @@ export default function App() {
           playing: false,
           leader: initial.session.leaderKey,
           serial: 0,
+          startAttempt: 0,
           phase: 'preparing',
         }
       : null,
@@ -163,6 +171,7 @@ export default function App() {
   const commandRef = useRef(command);
   commandRef.current = command;
   const [seekStartedAt, setSeekStartedAt] = useState(Date.now);
+  const startRequestedAt = useRef(0);
   function updateCommand(next: SyncCommand | null) {
     commandRef.current = next;
     setCommand(next);
@@ -239,13 +248,39 @@ export default function App() {
       const active = commandRef.current;
       if (active?.phase === 'preparing') {
         setPlaying(false);
-        if (seekBarrier(vods, active.moment, active.serial, next).complete)
+        if (seekBarrier(vods, active.moment, active.serial, next).complete) {
+          startRequestedAt.current = Date.now();
+          updateCommand({ ...active, phase: active.playing ? 'starting' : 'released' });
+        }
+        return;
+      }
+      if (active?.phase === 'starting') {
+        const progress = startProgress(vods, active.moment, active.serial, next);
+        const decision = startDecision(
+          progress,
+          Date.now() - startRequestedAt.current,
+          active.startAttempt,
+        );
+        if (decision === 'complete') {
           updateCommand({ ...active, phase: 'released' });
+          setPlaying(anyPlaying(vods, active.moment, next));
+          const source = vods.find((vod) => vodKey(vod) === active.leader);
+          if (source && next[active.leader]?.status === 'ended')
+            setMoment(startMs(source) + source.durationSeconds * 1000);
+        } else if (decision === 'retry') {
+          // Retry the whole group at the same moment so a late start cannot leave one behind.
+          syncTo(active.moment, true, active.leader, active.startAttempt + 1);
+        } else if (decision === 'failed') {
+          cancelSeek();
+          setNotice(
+            `Couldn’t start ${progress.waiting.map((vod) => vod.channel).join(', ')}. All players are paused. Press play inside the affected Twitch player, then Sync from it.`,
+          );
+        }
         return;
       }
       const source = vods.find((v) => vodKey(v) === leaderKey),
         state = next[leaderKey];
-      setPlaying(state?.status === 'ready' && !state.paused);
+      setPlaying(anyPlaying(vods, momentRef.current, next));
       if (
         source &&
         state?.status === 'ready' &&
@@ -259,12 +294,13 @@ export default function App() {
     return () => clearInterval(timer);
   }, [leaderKey, vods]);
 
-  function syncTo(nextMoment: number, nextPlaying = false, leader = leaderKey) {
+  function syncTo(nextMoment: number, nextPlaying = false, leader = leaderKey, startAttempt = 0) {
     updateCommand({
       moment: nextMoment,
       playing: nextPlaying,
       leader,
       serial: ++serial.current,
+      startAttempt,
       phase: 'preparing',
     });
     // Freeze every existing player immediately; asynchronous readiness never moves the shared clock.
@@ -490,17 +526,26 @@ export default function App() {
       setNotice(messageOf(error));
     }
   }
-  function sourceIsPlaying() {
-    try {
-      return handles.current.get(leaderKey)?.isPaused() === false;
-    } catch {
-      return false;
+  function playersArePlaying() {
+    const states: Record<string, PlaybackSnapshot> = {};
+    for (const vod of vods) {
+      try {
+        const state = handles.current.get(vodKey(vod))?.getSnapshot();
+        if (state) states[vodKey(vod)] = state;
+      } catch {
+        /* An unavailable player is not playing. */
+      }
     }
+    return anyPlaying(vods, moment, states);
   }
   function playback() {
     const active = commandRef.current;
     if (active?.phase === 'preparing') {
       updateCommand({ ...active, playing: !active.playing });
+      return;
+    }
+    if (active?.phase === 'starting' || playersArePlaying()) {
+      cancelSeek();
       return;
     }
     const leader =
@@ -510,10 +555,15 @@ export default function App() {
       setNotice('No recording covers this moment. Seek to a recorded part of the timeline.');
       return;
     }
-    syncTo(moment, !sourceIsPlaying(), vodKey(leader));
+    setNotice('');
+    syncTo(moment, true, vodKey(leader));
   }
 
   const preparing = command?.phase === 'preparing';
+  const starting = command?.phase === 'starting';
+  const startingProgress = starting
+    ? startProgress(vods, command.moment, command.serial, playbackStates)
+    : null;
   const bufferProgress = preparing
     ? seekBarrier(vods, command.moment, command.serial, playbackStates)
     : null;
@@ -734,6 +784,17 @@ export default function App() {
           </div>
         )}
       </main>
+      {startingProgress && startingProgress.total > 0 && (
+        <div className="buffer-status" role="status">
+          <LoaderCircle className="spin" size={14} />
+          <span title={startingProgress.waiting.map((vod) => vod.channel).join(', ')}>
+            Starting · {startingProgress.started}/{startingProgress.total} playing
+          </span>
+          <button className="text-button" onClick={cancelSeek}>
+            Cancel start
+          </button>
+        </div>
+      )}
       {bufferProgress && bufferProgress.total > 0 && (
         <div className="buffer-status" role="status">
           <LoaderCircle className="spin" size={14} />
@@ -759,14 +820,14 @@ export default function App() {
         <Timeline
           vods={vods}
           moment={moment}
-          playing={preparing ? command.playing : playing}
+          playing={preparing || starting ? command.playing : playing}
           preparing={preparing}
           playbackStates={playbackStates}
           onSeek={(time) => {
             const leader = vods.find((v) => matchMoment(v, time).state === 'playing');
             syncTo(
               time,
-              preparing ? command.playing : sourceIsPlaying(),
+              preparing || starting ? command.playing : playersArePlaying(),
               leader ? vodKey(leader) : leaderKey,
             );
           }}

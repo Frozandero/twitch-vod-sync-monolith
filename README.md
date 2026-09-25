@@ -16,6 +16,8 @@ Sync Twitch recordings in a grid, seek a shared timeline, and get timestamp link
 
 After a shared seek or Sync, all matching players stay paused until each has reached the requested position and buffered at least two seconds (or the remaining footage near its end). If playback was running, they resume together; a paused seek stays paused. A compact progress row shows how many are ready. You can change the resume choice with the timeline play/pause button, retry a stalled wait, or cancel it and leave everyone paused. Before-start and ended recordings do not hold up the wait.
 
+Starting also waits for confirmation that every matching VOD is actually playing. If Twitch leaves one paused, the group returns to the selected moment and retries, up to three attempts. A failed start pauses everyone and names the affected recordings. A blocked player can retry muted; its speaker button restores sound. The timeline pause button stops all players immediately, including when only a target is playing.
+
 A target that has not started is held at zero. A finished target is held at its end with its Twitch embed removed, preventing Twitch’s Up Next countdown from starting another VOD. Seeking back recreates the original recording. Unexpected video-ID changes also stop the embed before its clock can affect synchronization.
 
 The thin timeline line is the selected broadcast moment; each player’s thicker marker shows its actual reported position. Ahead/behind labels identify drift. A green bar means the confirmed player clock is within two seconds of the selection; metadata overlap alone does not prove playback is aligned. Clip inputs resolve to their parent VOD and clip-start offset. The full metadata-entry form is deliberately absent.

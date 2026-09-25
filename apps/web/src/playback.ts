@@ -6,6 +6,8 @@ export type PlaybackSnapshot = {
   status: 'loading' | 'ready' | 'before' | StopReason;
   seconds: number | null;
   paused: boolean;
+  startedSerial?: number;
+  playbackBlocked?: boolean;
   seek?: SeekProgress;
 };
 

@@ -87,7 +87,8 @@ export type SyncCommand = {
   playing: boolean;
   leader: string;
   serial: number;
-  phase: 'preparing' | 'released' | 'cancelled';
+  startAttempt: number;
+  phase: 'preparing' | 'starting' | 'released' | 'cancelled';
 };
 type Props = {
   vod: Vod;
@@ -131,6 +132,9 @@ export function Player({
   const guard = useRef<ReturnType<typeof createVodGuard> | null>(null);
   const preparation = useRef<ReturnType<typeof createSeekPreparation> | null>(null);
   const snapshot = useRef<(() => PlaybackSnapshot) | null>(null);
+  const startedSerial = useRef<number | undefined>(undefined);
+  const playbackBlocked = useRef(false);
+  const forceMuted = useRef(false);
   const [seekState, setSeekState] = useState<SeekState>('seeking');
   const [stopped, setStopped] = useState<{ serial: number | undefined; reason: StopReason }>();
   const [ready, setReady] = useState(false),
@@ -142,7 +146,15 @@ export function Player({
   const key = vodKey(vod),
     demo = vod.provenance === 'demo';
   const match = matchMoment(vod, moment);
-  const holding = command?.phase === 'preparing' && match.state === 'playing';
+  const holding =
+    (command?.phase === 'preparing' || command?.phase === 'starting') && match.state === 'playing';
+  const canPlay = command?.phase === 'starting' || command?.phase === 'released';
+  const holdLabel =
+    command?.phase === 'starting'
+      ? 'Starting playback…'
+      : seekState === 'ready'
+        ? 'Ready · waiting for other VODs'
+        : 'Buffering selected moment…';
   const blockedStatus =
     match.state !== 'playing'
       ? match.state
@@ -193,7 +205,12 @@ export function Player({
         blockedStatus === 'ended' ? vod.durationSeconds : blockedStatus === 'before' ? 0 : null;
       if (seconds !== null) setCurrent(seconds);
       register(key, {
-        getSnapshot: () => ({ status: blockedStatus, seconds, paused: true }),
+        getSnapshot: () => ({
+          status: blockedStatus,
+          seconds,
+          paused: true,
+          startedSerial: startedSerial.current,
+        }),
         getCurrentTime: () => {
           throw new Error('Seek to a playable moment before syncing from this recording.');
         },
@@ -222,6 +239,7 @@ export function Player({
           status: 'ready',
           seconds: update(),
           paused: !running,
+          startedSerial: startedSerial.current,
           seek: preparation.current?.sample(
             seconds,
             vod.durationSeconds - seconds,
@@ -246,6 +264,7 @@ export function Player({
         play: () => {
           last = performance.now();
           running = true;
+          startedSerial.current = commandRef.current?.serial;
         },
         setMuted: () => {},
       };
@@ -304,6 +323,8 @@ export function Player({
                   status: sample.confirmed ? 'ready' : 'loading',
                   seconds: sample.confirmed ? sample.seconds : null,
                   paused: twitch.isPaused(),
+                  startedSerial: startedSerial.current,
+                  playbackBlocked: playbackBlocked.current,
                   seek,
                 };
               },
@@ -326,7 +347,17 @@ export function Player({
             setError('');
           };
           blockedCallback = () => {
-            if (alive) setError('Press play inside the Twitch player, then sync again.');
+            if (!alive) return;
+            playbackBlocked.current = true;
+            if (commandRef.current?.phase === 'starting' && !forceMuted.current) {
+              forceMuted.current = true;
+              twitch.setMuted(true);
+              setMuted(true);
+              setError('Twitch blocked playback. Retrying muted.');
+            } else
+              setError(
+                'Twitch blocked playback. Press play inside this player, then Sync from it.',
+              );
           };
           playingCallback = () => {
             if (!alive || !identity.check()) return;
@@ -335,8 +366,12 @@ export function Player({
               return;
             }
             playbackClock.playing();
+            startedSerial.current = commandRef.current?.serial;
+            playbackBlocked.current = false;
             setClockReady(true);
-            setError('');
+            setError(
+              forceMuted.current ? 'Started muted. Use the speaker button to enable sound.' : '',
+            );
           };
           playCallback = () => {
             if (alive && commandRef.current?.phase === 'preparing') twitch.pause();
@@ -404,6 +439,8 @@ export function Player({
       vod.durationSeconds,
     );
     preparation.current = pending;
+    startedSerial.current = undefined;
+    playbackBlocked.current = false;
     setSeekState('seeking');
     let retries = 0,
       timer: ReturnType<typeof setTimeout> | undefined;
@@ -416,7 +453,6 @@ export function Player({
         handle.pause();
         clock.current?.requested(target.offsetSeconds);
         handle.seek(target.offsetSeconds);
-        if (commandRef.current?.phase === 'released' && commandRef.current.playing) handle.play();
         timer = setTimeout(() => {
           try {
             if (guard.current && !guard.current.check()) return;
@@ -431,7 +467,7 @@ export function Player({
         setError('The player is not ready to seek. Press play, then sync again.');
       }
     };
-    const silent = command.phase === 'preparing' || command.leader !== key;
+    const silent = command.phase === 'preparing' || command.leader !== key || forceMuted.current;
     handle.setMuted(silent);
     setMuted(silent);
     move();
@@ -443,12 +479,12 @@ export function Player({
   useEffect(() => {
     const handle = player.current;
     if (!ready || !handle || !command || blockedStatus) return;
-    if (command.phase !== 'released') {
+    if (!canPlay) {
       handle.pause();
       return;
     }
     if (guard.current && !guard.current.check()) return;
-    const silent = command.leader !== key;
+    const silent = command.leader !== key || forceMuted.current;
     handle.setMuted(silent);
     setMuted(silent);
     if (!command.playing) {
@@ -467,7 +503,7 @@ export function Player({
       clearTimeout(timer);
       if (frame !== undefined) cancelAnimationFrame(frame);
     };
-  }, [command?.phase, command?.serial, command?.playing, ready, blockedStatus]);
+  }, [canPlay, command?.serial, command?.playing, ready, blockedStatus]);
   useEffect(() => {
     if (!ready) return;
     const timer = setInterval(() => {
@@ -525,20 +561,7 @@ export function Player({
         </button>
         <strong title={vod.title}>{vod.channel}</strong>
         {holding && !blockedStatus && (
-          <span
-            className="seek-hold"
-            role="status"
-            title={
-              seekState === 'ready'
-                ? 'Ready · waiting for other VODs'
-                : 'Buffering selected moment…'
-            }
-            aria-label={
-              seekState === 'ready'
-                ? 'Ready · waiting for other VODs'
-                : 'Buffering selected moment…'
-            }
-          >
+          <span className="seek-hold" role="status" title={holdLabel} aria-label={holdLabel}>
             <LoaderCircle className="spin" size={14} />
           </span>
         )}
@@ -563,6 +586,8 @@ export function Player({
             aria-label={`${muted ? 'Unmute' : 'Mute'} ${vod.channel}`}
             onClick={() => {
               player.current?.setMuted(!muted);
+              forceMuted.current = false;
+              setError('');
               setMuted(!muted);
             }}
           >
