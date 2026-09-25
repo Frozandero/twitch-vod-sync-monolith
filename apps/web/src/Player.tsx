@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { ExternalLink, RefreshCw, SlidersHorizontal, Volume2, VolumeX, X } from 'lucide-react';
 import { formatTime, matchDescription, matchMoment, vodKey, type Vod } from '@vodsync/core';
+import { createPlayerClock } from './playerClock';
 
 export type PlayerHandle = {
   getCurrentTime(): number;
@@ -19,6 +20,7 @@ type TwitchConstructor = {
   new (element: HTMLElement, options: object): TwitchPlayer;
   READY: string;
   PLAYBACK_BLOCKED: string;
+  PLAYING: string;
 };
 declare global {
   interface Window {
@@ -68,7 +70,9 @@ type Props = {
 export function Player({ vod, source, command, register, onSync, onRemove, onSettings }: Props) {
   const container = useRef<HTMLDivElement>(null);
   const player = useRef<PlayerHandle | null>(null);
+  const clock = useRef<ReturnType<typeof createPlayerClock> | null>(null);
   const [ready, setReady] = useState(false),
+    [clockReady, setClockReady] = useState(false),
     [error, setError] = useState(''),
     [muted, setMuted] = useState(true),
     [current, setCurrent] = useState(0),
@@ -84,10 +88,13 @@ export function Player({ vod, source, command, register, onSync, onRemove, onSet
       timer: ReturnType<typeof setTimeout> | undefined;
     let readyEvent: string | undefined,
       blockedEvent: string | undefined,
+      playingEvent: string | undefined,
       readyCallback: (() => void) | undefined,
-      blockedCallback: (() => void) | undefined;
+      blockedCallback: (() => void) | undefined,
+      playingCallback: (() => void) | undefined;
     const host = container.current;
     setReady(false);
+    setClockReady(demo);
     setError('');
     if (demo) {
       let seconds = 0,
@@ -140,21 +147,40 @@ export function Player({ vod, source, command, register, onSync, onRemove, onSet
             muted: true,
             time: `${Math.floor(offset)}s`,
           });
+          const twitch = instance;
+          const playbackClock = createPlayerClock(() => twitch.getCurrentTime(), offset);
+          clock.current = playbackClock;
+          setCurrent(offset);
           readyEvent = PlayerClass.READY;
           blockedEvent = PlayerClass.PLAYBACK_BLOCKED;
+          playingEvent = PlayerClass.PLAYING;
           readyCallback = () => {
             if (!alive || !instance) return;
             clearTimeout(timer);
             player.current = instance;
-            register(key, instance);
+            register(key, {
+              getCurrentTime: playbackClock.getCurrentTime,
+              isPaused: () => twitch.isPaused(),
+              seek: (time) => twitch.seek(time),
+              pause: () => twitch.pause(),
+              play: () => twitch.play(),
+              setMuted: (silent) => twitch.setMuted(silent),
+            });
             setReady(true);
             setError('');
           };
           blockedCallback = () => {
             if (alive) setError('Press play inside the Twitch player, then sync again.');
           };
+          playingCallback = () => {
+            if (!alive) return;
+            playbackClock.playing();
+            setClockReady(true);
+            setError('');
+          };
           instance.addEventListener(readyEvent, readyCallback);
           instance.addEventListener(blockedEvent, blockedCallback);
+          instance.addEventListener(playingEvent, playingCallback);
           timer = setTimeout(() => {
             if (alive)
               setError('Twitch is taking too long to load. Retry or open the VOD directly.');
@@ -171,8 +197,11 @@ export function Player({ vod, source, command, register, onSync, onRemove, onSet
         instance.removeEventListener(readyEvent, readyCallback);
       if (instance && blockedEvent && blockedCallback)
         instance.removeEventListener(blockedEvent, blockedCallback);
+      if (instance && playingEvent && playingCallback)
+        instance.removeEventListener(playingEvent, playingCallback);
       register(key, null);
       player.current = null;
+      clock.current = null;
       host?.replaceChildren();
     };
   }, [key, demo, attempt]);
@@ -185,13 +214,18 @@ export function Player({ vod, source, command, register, onSync, onRemove, onSet
     const move = () => {
       try {
         if (target.state !== 'playing' || !command.playing) handle.pause();
+        clock.current?.requested(target.offsetSeconds);
         handle.seek(target.offsetSeconds);
         if (target.state === 'playing' && command.playing) handle.play();
         timer = setTimeout(() => {
-          const actual = handle.getCurrentTime();
-          setCurrent(actual);
-          // READY can precede loaded media. Retry only this requested seek, never ongoing drift.
-          if (Math.abs(actual - target.offsetSeconds) > 3 && retries++ < 3) move();
+          try {
+            const actual = handle.getCurrentTime();
+            setCurrent(clock.current?.sample().seconds ?? actual);
+            // READY can precede loaded media. Retry only this requested seek, never ongoing drift.
+            if (Math.abs(actual - target.offsetSeconds) > 3 && retries++ < 3) move();
+          } catch {
+            setError('The player is not ready to seek. Press play, then sync again.');
+          }
         }, 700);
       } catch {
         setError('The player is not ready to seek. Press play, then sync again.');
@@ -207,7 +241,11 @@ export function Player({ vod, source, command, register, onSync, onRemove, onSet
     if (!ready) return;
     const timer = setInterval(() => {
       try {
-        if (player.current) setCurrent(player.current.getCurrentTime());
+        if (clock.current) {
+          const position = clock.current.sample();
+          setCurrent(position.seconds);
+          setClockReady(position.confirmed);
+        } else if (player.current) setCurrent(player.current.getCurrentTime());
       } catch {
         /* Loading. */
       }
@@ -225,9 +263,13 @@ export function Player({ vod, source, command, register, onSync, onRemove, onSet
         <div className="player-actions">
           <button
             className={`sync-button ${source ? 'selected' : ''}`}
-            disabled={!ready}
+            disabled={!ready || !clockReady}
             onClick={() => onSync(vod)}
-            title={`Sync all players to ${vod.channel}`}
+            title={
+              clockReady
+                ? `Sync all players to ${vod.channel}`
+                : 'Press play inside Twitch to enable sync from this recording'
+            }
           >
             <RefreshCw size={13} />
             <span>Sync</span>

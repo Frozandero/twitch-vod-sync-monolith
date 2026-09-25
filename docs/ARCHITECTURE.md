@@ -30,7 +30,7 @@ Twitch READY gates commands. The initial embed URL also includes the desired tim
 
 The timeline follows the last synced player's clock while it plays. Reading clocks does not issue repeated seeks. Switching to Links unmounts players. Watch mode only changes layout, preserving player instances.
 
-Third-party iframe controls, content restrictions, ads, buffering, and autoplay remain Twitch-controlled. A header clock may initially lack a playback position until Twitch emits state.
+Third-party iframe controls, content restrictions, ads, buffering, and autoplay remain Twitch-controlled. Before Twitch reports a position or emits PLAYING, the header shows the requested position and disables Sync from that player. Its initial zero must not overwrite the shared moment. Once the clock is confirmed, a subsequent zero is a valid user seek.
 
 ## Persistence
 

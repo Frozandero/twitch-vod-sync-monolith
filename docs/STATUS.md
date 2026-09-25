@@ -6,7 +6,7 @@ This file records actual checks and their limits. A passing build does not prove
 
 ## Automated coverage
 
-66 core/provider tests pass, with TypeScript, formatting, and production-build checks. Coverage includes timestamp formats, URL validation, timezones, exact start/end boundaries, gaps, corrections, subsecond arithmetic, Unicode sessions, v1 migration, oversized shares, stripping unknown credentials, clip zero/null offsets, missing VODs, uploads/highlights, official API routing, auth errors, and the isolated experimental Kick adapter.
+70 core/provider/player-clock tests pass, with TypeScript, formatting, and production-build checks. Coverage includes timestamp formats, URL validation, timezones, exact start/end boundaries, gaps, corrections, subsecond arithmetic, Unicode sessions, v1 migration, oversized shares, stripping unknown credentials, clip zero/null offsets, missing VODs, uploads/highlights, official API routing, auth errors, initial unconfirmed player clocks, and the isolated experimental Kick adapter.
 
 ## Browser and deployment
 
@@ -16,7 +16,8 @@ This file records actual checks and their limits. A passing build does not prove
 - JSON export/import followed by an immediate reload exposed a persistence debounce race. Persistence now writes immediately instead of waiting 200 ms; the full export/import/immediate-reload browser check passed on rerun.
 - Screenshots and transient browser scripts live in ignored `output/playwright/`; they are not production assets. Browser runs used isolated profiles. No account login was performed.
 - Twitch's embedded frames emitted third-party fingerprinting rate-limit and permissions-policy errors during playback. The app's metadata lookup, mapped positions, and player playback succeeded despite these; this is not a claim that every third-party request succeeds.
-- GitHub Pages is configured for Actions artifact deployment. Release runs are visible in [Actions](https://github.com/Frozandero/twitch-vod-sync-monolith/actions).
+- The first [GitHub Pages deployment](https://github.com/Frozandero/twitch-vod-sync-monolith/actions/runs/36141399577) succeeded. The published repository-subpath page loaded, resolved both real Twitch VODs to the expected timestamps, and loaded their official player frames with the correct parent host.
+- The production smoke check exposed Twitch returning an initial zero while its iframe showed the requested two-hour position. The app now displays the requested position and prevents Sync from that player until Twitch reports a position or starts playback. Regression tests cover initial zero, later valid seeks to zero, and invalid clock values.
 
 ## Explicitly unverified integration paths
 
