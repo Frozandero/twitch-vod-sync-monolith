@@ -22,6 +22,12 @@ The shared moment is independent of the last selected player's interval. This is
 
 GET Clips `vod_offset` and GraphQL `videoOffsetSeconds` are the clip start in the parent VOD. Add the clip-local offset; fetch the parent broadcast's start. Never use clip creation time or subtract clip duration. Reject automatic mapping of highlights/uploads.
 
+## Streamer target resolution
+
+`parseChannelTarget` distinguishes `twitch/name`, `kick/name`, and plain channel URLs from media references. It rejects credentials, unexpected hosts/ports, and query/hash variants, leaving query-style Kick clips on the clip path. `recordingInputs.ts` resolves explicit media first in bounded batches, applies the established first-successful-media anchor rule, then resolves streamer targets against that single captured UTC moment. Channel-only inputs require an existing session. Targets never choose the source; additions preserve paste order, canonical-ID deduplication, existing corrections, and loaded durations. Each failed input is retained for correction without discarding successful additions or existing VODs. Only concrete normalized VODs are saved; no ongoing channel subscription is created.
+
+Twitch channel lookup validates login/owner/archive type and paginates with bounded, nonrepeating cursors. Public GraphQL allows up to ten pages of 30 entries; authenticated Helix resolves the user ID and requests up to ten pages of 100 archives sorted by time. Provider failures stop lookup, with no anonymous fallback after authenticated failure. Kick reuses the five-minute channel index cache, filters reliable broadcast-time hints, and confirms each candidate through canonical detail metadata, public/completed status, owner, and half-open coverage. It fetches at most three candidates concurrently within the existing 50-entry limit. Newest-start matching candidates are preferred within the current page/batch; no nearest-date or newest-VOD fallback is allowed. The final selected recording must still cover the moment after saved correction and duration are applied.
+
 ## Player coordination
 
 A sync command contains the UTC moment, desired play/pause state, last selected player key, monotonic serial, bounded start-attempt count, and preparation/starting/release/cancellation phase. Clicking a player's Sync reads its position and pause state. Targets seek to matching offsets; those out of bounds pause. The selected player supplies audio; mute can be adjusted separately.

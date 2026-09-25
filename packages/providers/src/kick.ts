@@ -1,5 +1,7 @@
 import {
   momentAt,
+  matchMoment,
+  startMs,
   parseMedia,
   validateVod,
   type MediaRef,
@@ -75,9 +77,10 @@ function makeVod(ref: MediaRef, v: any, modern: boolean): Vod {
 type Cache = {
   expires: number;
   recordings: Map<string, Promise<Vod>>;
-  lists: Map<string, Promise<string[]>>;
+  lists: Map<string, Promise<ChannelRecording[]>>;
   playback: Map<string, string>;
 };
+type ChannelRecording = { id: string; start?: number; duration?: number; live: boolean };
 const caches = new WeakMap<Fetcher, Cache>();
 function cacheFor(fetcher: Fetcher) {
   let cache = caches.get(fetcher);
@@ -114,6 +117,89 @@ function legacyVod(ref: MediaRef, fetcher: Fetcher): Promise<Vod> {
   cache.recordings.set(ref.id, pending);
   return pending;
 }
+function channelRecordings(slug: string, fetcher: Fetcher): Promise<ChannelRecording[]> {
+  const cache = cacheFor(fetcher);
+  let list = cache.lists.get(slug);
+  if (!list) {
+    list = kickJson(`https://kick.com/api/v2/channels/${channelSlug(slug)}/videos`, fetcher)
+      .then((items) => {
+        if (!Array.isArray(items)) throw new Error('Kick returned an invalid recording list.');
+        return items.slice(0, 50).flatMap((item) => {
+          try {
+            const id = vodRef(item?.video?.uuid, slug).id;
+            const rawStart = String(item.start_time ?? '').replace(' ', 'T');
+            const utcStart = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?$/.test(rawStart)
+              ? `${rawStart}Z`
+              : rawStart;
+            const start = /^\d{4}-\d{2}-\d{2}T.*(?:Z|[+-]\d{2}:\d{2})$/.test(utcStart)
+              ? Date.parse(utcStart)
+              : NaN;
+            return [
+              {
+                id,
+                start: Number.isFinite(start) ? start : undefined,
+                duration:
+                  typeof item.duration === 'number' &&
+                  item.duration > 0 &&
+                  item.duration <= 31536000000
+                    ? item.duration / 1000
+                    : undefined,
+                live: item.is_live === true,
+              },
+            ];
+          } catch {
+            return [];
+          }
+        });
+      })
+      .catch((error) => {
+        cache.lists.delete(slug);
+        throw error;
+      });
+    cache.lists.set(slug, list);
+  }
+  return list;
+}
+
+export async function resolveKickChannel(
+  slug: string,
+  momentMs: number,
+  fetcher: Fetcher,
+): Promise<ResolvedMedia> {
+  // List times narrow the search only. Detail metadata must confirm identity,
+  // channel, public/completed status, and the half-open broadcast interval.
+  const candidates = (await channelRecordings(slug, fetcher))
+    .filter(
+      (item) =>
+        !item.live &&
+        (item.start === undefined ||
+          item.duration === undefined ||
+          (momentMs >= item.start && momentMs < item.start + item.duration * 1000)),
+    )
+    .sort((a, b) => (b.start ?? 0) - (a.start ?? 0));
+  for (let i = 0; i < candidates.length; i += 3) {
+    const batch = await Promise.allSettled(
+      candidates.slice(i, i + 3).map((item) => legacyVod(vodRef(item.id, slug), fetcher)),
+    );
+    const matches: Vod[] = [];
+    for (const result of batch) {
+      if (result.status === 'rejected') {
+        if (!(result.reason instanceof KickHttpError) || result.reason.status !== 404)
+          throw result.reason;
+      } else if (
+        new URL(result.value.url).pathname.split('/')[1] === slug &&
+        matchMoment(result.value, momentMs).state === 'playing'
+      )
+        matches.push(result.value);
+    }
+    matches.sort((a, b) => startMs(b) - startMs(a));
+    if (matches[0])
+      return { vod: matches[0], offsetSeconds: matchMoment(matches[0], momentMs).offsetSeconds };
+  }
+  throw new Error(
+    `No available Kick past broadcast for ${slug} covers ${new Date(momentMs).toISOString()}. Checked the channel's public index (up to 50 recent recordings); live, older, deleted, or unavailable VODs may be missing.`,
+  );
+}
 async function kickVod(ref: MediaRef, fetcher: Fetcher): Promise<Vod> {
   try {
     return await legacyVod(ref, fetcher);
@@ -121,28 +207,7 @@ async function kickVod(ref: MediaRef, fetcher: Fetcher): Promise<Vod> {
     if (!(error instanceof KickHttpError) || error.status !== 404) throw error;
     const slug = /^\/([\w-]+)\/videos\//.exec(new URL(ref.url).pathname)?.[1];
     if (!slug) throw error;
-    const cache = cacheFor(fetcher);
-    let list = cache.lists.get(slug);
-    if (!list) {
-      list = kickJson(`https://kick.com/api/v2/channels/${channelSlug(slug)}/videos`, fetcher)
-        .then((items) => {
-          if (!Array.isArray(items)) throw new Error('Kick returned an invalid recording list.');
-          // Resource guard: inspect recent public recordings, never infer identity from dates.
-          return items.slice(0, 50).flatMap((item) => {
-            try {
-              return [vodRef(item?.video?.uuid, slug).id];
-            } catch {
-              return [];
-            }
-          });
-        })
-        .catch((error) => {
-          cache.lists.delete(slug);
-          throw error;
-        });
-      cache.lists.set(slug, list);
-    }
-    const ids = await list;
+    const ids = (await channelRecordings(slug, fetcher)).map((item) => item.id);
     for (let i = 0; i < ids.length; i += 3) {
       const batch = await Promise.allSettled(
         ids.slice(i, i + 3).map((id) => legacyVod(vodRef(id, slug), fetcher)),

@@ -79,6 +79,16 @@ The newer clip service exposes `video.id` and `video.offset` but also lacks exte
 
 Kick's Share dialog with **Start at** checked produced `?t=205`. The canonical clip-parent destination with `?t=9292` loaded the VOD and sought into the corresponding recording in Brave. Timestamp links use integer seconds. These are observed internal contracts, not a stable API guarantee. Player duration/content may differ from metadata owing to processing, ads, or interruptions; corrections remain available. Playback alignment uses a verified media clock, never metadata coverage alone.
 
+## Streamer targets — observed 2026-09-25
+
+Twitch's official [Get Users](https://dev.twitch.tv/docs/api/reference/#get-users) resolves a login to an ID; [Get Videos](https://dev.twitch.tv/docs/api/reference/#get-videos) accepts `user_id`, archive type, time ordering, page size, and a pagination cursor. The connected adapter follows that path with a ten-page guard. It validates returned owner IDs and past-broadcast type before comparing UTC intervals. This route has fixture coverage; a real OAuth connection remains unverified.
+
+A credential-free request to [Twitch's public GraphQL service](https://gql.twitch.tv/gql) for `user(login).videos(first: 30, type: ARCHIVE, sort: TIME)` returned archive IDs, start times, durations, owner logins, edge cursors, and `hasNextPage`. The next request with the returned cursor was rejected with `IntegrityCheckFailed`. No integrity token or bypass was attempted. Recent first-page lookup worked in the browser; deeper anonymous history is not guaranteed. The app stops on that error and offers the existing official Twitch connection. At most ten public pages are attempted if Twitch permits them.
+
+The [Kick channel index](https://kick.com/api/v2/channels/aikobliss/videos) returned 28 entries, including `start_time`, millisecond `duration`, `is_live`, and legacy `video.uuid`, with CORS permitting the Pages origin. These fields only narrow candidates: the [detail endpoint](https://kick.com/api/v1/video/089d5bf8-0aec-4576-9809-0689633feca6) must confirm the public/completed broadcast, owner, canonical `livestream.vod_id`, start, and duration. No identity is inferred from time. Lookup checks up to 50 recent index entries and never chooses a nearby non-overlapping VOD. Live/expired/older unindexed recordings can remain unavailable.
+
+In the local app at `2026-09-23T21:45:49Z`, `twitch/aikobliss` selected `2882074717` at 12959 seconds and `kick/aikobliss` selected canonical `01a0d036-d2e8-7921-a378-da2f05c97032` at 300 seconds. A subsequent `twitch/xqc` target selected `2882233662` at 261 seconds without changing the source or moment. These are metadata-based broadcast matches; player clocks still require separate verification through the existing playback adapters.
+
 ## GitHub Pages and repository choice
 
 [GitHub's custom Pages workflow documentation](https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages) supports building and deploying an artifact directly from a repository. Therefore a second repository or deployment submodule adds no capability for this project. A workspace monorepo keeps the web app and future extension next to shared logic, while deployment artifacts stay out of Git. Actions references are pinned to verified commit hashes.

@@ -25,7 +25,6 @@ import {
   formatTime,
   matchMoment,
   momentAt,
-  parseMedia,
   parseTime,
   startMs,
   timelineBounds,
@@ -34,7 +33,8 @@ import {
   type Session,
   type Vod,
 } from '@vodsync/core';
-import { resolveMedia, type TwitchAuth } from '@vodsync/providers';
+import type { TwitchAuth } from '@vodsync/providers';
+import { resolveRecordingInputs } from './recordingInputs';
 import {
   beginLogin,
   configuredClientId,
@@ -361,6 +361,7 @@ export default function App() {
   }
   async function addRecordings(event?: FormEvent) {
     event?.preventDefault();
+    if (busy || authLoading) return;
     setNotice('');
     setFailures([]);
     const inputs = [
@@ -372,7 +373,7 @@ export default function App() {
       ),
     ];
     if (!inputs.length) {
-      setNotice('Paste a Twitch or Kick VOD URL, timestamped URL, or clip.');
+      setNotice('Paste a VOD, clip, twitch/name, or kick/name.');
       return;
     }
     if (inputs.length > MAX_VODS) {
@@ -380,51 +381,21 @@ export default function App() {
       return;
     }
     setBusy(true);
-    const results: PromiseSettledResult<Awaited<ReturnType<typeof resolveMedia>>>[] = [];
-    for (let i = 0; i < inputs.length; i += 4)
-      results.push(
-        ...(await Promise.allSettled(
-          inputs.slice(i, i + 4).map(async (url) => {
-            return resolveMedia(url, auth);
-          }),
-        )),
+    try {
+      const result = await resolveRecordingInputs(
+        inputs,
+        { vods, momentMs: moment, leaderKey },
+        auth,
       );
-    const next = new Map(vods.filter((v) => v.provenance !== 'demo').map((v) => [vodKey(v), v]));
-    const errors: typeof failures = [];
-    let anchor: { vod: Vod; offsetSeconds: number; input: string } | undefined;
-    results.forEach((result, i) => {
-      if (result.status === 'rejected') {
-        errors.push({
-          input: inputs[i],
-          error: messageOf(result.reason),
-        });
-        return;
+      if (result.added) {
+        setVods(result.vods);
+        syncTo(result.momentMs, false, result.leaderKey);
+        setInput(result.failures.map((failure) => failure.input).join('\n'));
       }
-      const { vod, offsetSeconds } = result.value;
-      try {
-        momentAt(vod, offsetSeconds);
-      } catch (error) {
-        errors.push({ input: inputs[i], error: messageOf(error) });
-        return;
-      }
-      if (!next.has(vodKey(vod)) && next.size >= MAX_VODS) {
-        errors.push({ input: inputs[i], error: 'This session is too large.' });
-        return;
-      }
-      const added = { ...vod, correctionSeconds: next.get(vodKey(vod))?.correctionSeconds ?? 0 };
-      next.set(vodKey(vod), added);
-      if (!anchor) anchor = { vod: added, offsetSeconds, input: inputs[i] };
-    });
-    if (anchor) {
-      setVods([...next.values()]);
-      const first = anchor as { vod: Vod; offsetSeconds: number; input: string };
-      const ref = parseMedia(first.input);
-      if (!vods.length || demo || ref.kind === 'clip' || /[?&](t|time)=/.test(first.input))
-        syncTo(momentAt(first.vod, first.offsetSeconds), false, vodKey(first.vod));
-      else syncTo(moment, false, leaderKey);
-      setInput(errors.map((e) => e.input).join('\n'));
+      setFailures(result.failures);
+    } catch (error) {
+      setNotice(messageOf(error));
     }
-    setFailures(errors);
     setBusy(false);
   }
   function syncFrom(vod: Vod) {
@@ -669,12 +640,12 @@ export default function App() {
         }}
       />
       <form className="add-bar" onSubmit={addRecordings}>
-        <label htmlFor="vod-input">VOD / clip URLs</label>
+        <label htmlFor="vod-input">VODs / clips / streamers</label>
         <textarea
           id="vod-input"
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder="Paste VODs, timestamped URLs, or clips · one per line"
+          placeholder="VODs, clips, twitch/name or kick/name · one per line"
           rows={1}
           disabled={busy}
           onKeyDown={(e) => {
@@ -738,7 +709,10 @@ export default function App() {
         {!vods.length ? (
           <div className="empty-state">
             <h1>Add recordings</h1>
-            <p>Paste links above. Sync from any player, or drag the timeline to choose a moment.</p>
+            <p>
+              Start with a VOD or clip. Then add twitch/name or kick/name to find matching
+              recordings.
+            </p>
           </div>
         ) : (
           <div ref={grid} className={`player-grid ${draggingKey ? 'is-reordering' : ''}`}>
@@ -1005,6 +979,11 @@ export default function App() {
               Paste Twitch or Kick VOD/clip URLs, timestamped URLs, or Twitch IDs. The first
               recording sets the initial moment. Adding a timestamped URL or clip selects that
               moment in its parent VOD.
+            </p>
+            <p>
+              Add twitch/name or kick/name (or a channel URL) to find that streamer's VOD at the
+              selected timeline moment. You can paste several targets, including alongside a source
+              VOD or clip. Only available past broadcasts covering that moment are added.
             </p>
             <p>
               <strong>Grid:</strong> seek any player, then click its Sync button. The others jump to

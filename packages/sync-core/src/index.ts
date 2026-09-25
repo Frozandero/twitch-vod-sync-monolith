@@ -18,6 +18,7 @@ export type Vod = {
   provenance: 'twitch-public' | 'twitch-helix' | 'kick-public' | 'manual' | 'demo';
 };
 export type ResolvedMedia = { vod: Vod; offsetSeconds: number };
+export type ChannelTarget = { platform: Platform; channel: string };
 export type Match = {
   state: 'before' | 'playing' | 'ended';
   offsetSeconds: number;
@@ -142,6 +143,39 @@ export function parseMedia(input: string): MediaRef {
       };
   }
   throw new Error('Unsupported link. Use a Twitch or Kick VOD/clip URL.');
+}
+
+// Channel targets select footage at an existing moment; they are not media IDs.
+export function parseChannelTarget(input: string): ChannelTarget | undefined {
+  const value = input.trim();
+  const shorthand = /^(twitch|kick)\/([\w-]{1,100})\/?$/i.exec(value);
+  let platform: Platform;
+  let channel: string;
+  if (shorthand) {
+    platform = shorthand[1].toLowerCase() as Platform;
+    channel = shorthand[2].toLowerCase();
+  } else {
+    let url: URL;
+    try {
+      url = new URL(/^[a-z]+:\/\//i.test(value) ? value : `https://${value}`);
+    } catch {
+      return;
+    }
+    if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password || url.port)
+      return;
+    const host = url.hostname.toLowerCase().replace(/^(www|m)\./, '');
+    if (host !== 'twitch.tv' && host !== 'kick.com') return;
+    // In particular, /channel?clip=... must keep going through clip resolution.
+    if (url.search || url.hash || !/^\/[\w-]{1,100}\/?$/.test(url.pathname)) return;
+    platform = host === 'twitch.tv' ? 'twitch' : 'kick';
+    channel = url.pathname.replace(/\//g, '').toLowerCase();
+  }
+  if (platform === 'twitch' && !/^\w{1,25}$/.test(channel)) return;
+  if (
+    ['videos', 'video', 'clips', 'directory', 'search', 'settings', 'downloads'].includes(channel)
+  )
+    return;
+  return { platform, channel };
 }
 
 export const vodKey = (vod: Pick<Vod, 'platform' | 'id'>) => `${vod.platform}:${vod.id}`;

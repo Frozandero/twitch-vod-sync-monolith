@@ -1,7 +1,10 @@
-import { resolveKick } from './kick';
+import { resolveKick, resolveKickChannel } from './kick';
 export { resolveKickPlayback } from './kick';
 import {
   parseMedia,
+  parseChannelTarget,
+  matchMoment,
+  startMs,
   parseTime,
   validateVod,
   type MediaRef,
@@ -25,6 +28,115 @@ async function json(url: string, options: RequestInit, fetcher: Fetcher): Promis
     );
   return response.json();
 }
+export async function resolveChannelTarget(
+  input: string,
+  momentMs: number,
+  auth?: TwitchAuth,
+  fetcher: Fetcher = fetch,
+): Promise<ResolvedMedia> {
+  const target = parseChannelTarget(input);
+  if (!target) throw new Error('Use twitch/name or kick/name for a streamer target.');
+  if (!Number.isFinite(momentMs) || !Number.isFinite(new Date(momentMs).getTime()))
+    throw new Error('Select a broadcast moment first.');
+  if (target.platform === 'kick') return resolveKickChannel(target.channel, momentMs, fetcher);
+  const { channel } = target;
+  const user = auth
+    ? await helix(
+        `users?login=${encodeURIComponent(channel)}`,
+        auth,
+        fetcher,
+        `Twitch channel ${channel} was not found.`,
+      )
+    : null;
+  if (
+    auth &&
+    (typeof user?.id !== 'string' ||
+      !/^\d+$/.test(user.id) ||
+      typeof user.login !== 'string' ||
+      user.login.toLowerCase() !== channel)
+  )
+    throw new Error('Twitch returned a different channel.');
+  let cursor: string | null = null;
+  const cursors = new Set<string>();
+  for (let page = 0; page < 10; page++) {
+    let items: any[];
+    let next: unknown;
+    if (auth) {
+      const params = new URLSearchParams({
+        user_id: user.id,
+        type: 'archive',
+        sort: 'time',
+        first: '100',
+      });
+      if (cursor) params.set('after', cursor);
+      const data = await json(
+        `https://api.twitch.tv/helix/videos?${params}`,
+        {
+          headers: { 'Client-ID': auth.clientId, Authorization: `Bearer ${auth.token}` },
+        },
+        fetcher,
+      );
+      if (!Array.isArray(data.data)) throw new Error('Twitch returned an invalid recording list.');
+      items = data.data.slice(0, 100);
+      next = data.pagination?.cursor;
+    } else {
+      const data = await gql(
+        'query VodSyncChannel($login: String!, $after: Cursor) { user(login: $login) { login videos(first: 30, after: $after, type: ARCHIVE, sort: TIME) { edges { cursor node { id title createdAt lengthSeconds broadcastType owner { login displayName } } } pageInfo { hasNextPage } } } }',
+        { login: channel, after: cursor },
+        fetcher,
+      );
+      if (!data?.user) throw new Error(`Twitch channel ${channel} was not found.`);
+      if (typeof data.user.login !== 'string' || data.user.login.toLowerCase() !== channel)
+        throw new Error('Twitch returned a different channel.');
+      const list = data.user.videos;
+      if (!Array.isArray(list?.edges))
+        throw new Error('Twitch returned an invalid recording list.');
+      items = list.edges.slice(0, 30).map((edge: any) => edge?.node);
+      next = list.pageInfo?.hasNextPage ? list.edges.at(-1)?.cursor : undefined;
+      if (list.pageInfo?.hasNextPage && !next)
+        throw new Error('Twitch did not provide the next recording page. Retry the lookup.');
+    }
+    const matches: Vod[] = [];
+    for (const v of items) {
+      if (!v || typeof v.id !== 'string' || !/^\d+$/.test(v.id)) continue;
+      if (
+        auth
+          ? v.type !== 'archive' || v.user_id !== user.id
+          : v.broadcastType !== 'ARCHIVE' ||
+            typeof v.owner?.login !== 'string' ||
+            v.owner.login.toLowerCase() !== channel
+      )
+        continue;
+      try {
+        const vod = validateVod({
+          platform: 'twitch',
+          id: v.id,
+          url: `https://www.twitch.tv/videos/${v.id}`,
+          title: v.title,
+          channel: auth ? v.user_name : v.owner.displayName,
+          startedAt: auth ? v.created_at : v.createdAt,
+          durationSeconds: auth ? parseTime(v.duration) : v.lengthSeconds,
+          correctionSeconds: 0,
+          provenance: auth ? 'twitch-helix' : 'twitch-public',
+        });
+        if (matchMoment(vod, momentMs).state === 'playing') matches.push(vod);
+      } catch {
+        /* Unusable archive metadata cannot establish a match. */
+      }
+    }
+    matches.sort((a, b) => startMs(b) - startMs(a));
+    if (matches[0])
+      return { vod: matches[0], offsetSeconds: matchMoment(matches[0], momentMs).offsetSeconds };
+    if (!next) break;
+    if (typeof next !== 'string' || next.length > 2048 || cursors.has(next))
+      throw new Error('Twitch repeated or returned an invalid recording page. Retry the lookup.');
+    cursors.add(next);
+    cursor = next;
+  }
+  throw new Error(
+    `No available Twitch past broadcast for ${channel} covers ${new Date(momentMs).toISOString()}. Checked up to ${auth ? 1000 : 300} recent recordings; older, deleted, or unavailable VODs may be missing.`,
+  );
+}
 async function gql(query: string, variables: object, fetcher: Fetcher) {
   const payload = await json(
     'https://gql.twitch.tv/gql',
@@ -39,14 +151,18 @@ async function gql(query: string, variables: object, fetcher: Fetcher) {
     throw new Error('Twitch public lookup is unavailable. Retry or connect Twitch in Settings.');
   return payload.data;
 }
-async function helix(path: string, auth: TwitchAuth, fetcher: Fetcher) {
+async function helix(
+  path: string,
+  auth: TwitchAuth,
+  fetcher: Fetcher,
+  emptyMessage = 'Recording is unavailable, deleted, or not accessible to this account.',
+) {
   const result = await json(
     `https://api.twitch.tv/helix/${path}`,
     { headers: { 'Client-ID': auth.clientId, Authorization: `Bearer ${auth.token}` } },
     fetcher,
   );
-  if (!result.data?.[0])
-    throw new Error('Recording is unavailable, deleted, or not accessible to this account.');
+  if (!result.data?.[0]) throw new Error(emptyMessage);
   return result.data[0];
 }
 async function twitchVod(id: string, auth: TwitchAuth | undefined, fetcher: Fetcher): Promise<Vod> {
