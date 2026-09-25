@@ -22,6 +22,7 @@ import { createVodGuard, type PlaybackSnapshot, type StopReason } from './playba
 import { createSeekPreparation, seekPosition, type SeekState } from './seekBarrier';
 import { supportsPlayback } from './capabilities';
 import { createKickPlayer } from './kickPlayer';
+import type { GridPosition } from './gridLayout';
 
 export type PlayerHandle = {
   getSnapshot(): PlaybackSnapshot;
@@ -106,6 +107,7 @@ type Props = {
   workspaceControls?: ReactNode;
   order: {
     index: number;
+    position: GridPosition;
     count: number;
     disabled: boolean;
     dragging: boolean;
@@ -622,7 +624,11 @@ export function Player({
       className={`player-tile ${source ? 'is-source' : ''} ${order.dragging ? 'is-dragging' : ''} ${order.target ? 'is-drop-target' : ''}`}
       aria-label={`${vod.channel} player`}
       data-vod-key={key}
-      style={{ order: order.index }}
+      style={{
+        order: order.index,
+        gridRow: order.position.row,
+        gridColumn: `${order.position.column} / span ${order.position.span}`,
+      }}
       onDragOver={order.onOver}
       onDrop={order.onDrop}
     >

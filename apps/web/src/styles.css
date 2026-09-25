@@ -250,8 +250,8 @@ svg {
   min-width: 0;
 }
 .player-grid {
+  --player-min-width: 402px;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 400px), 1fr));
   gap: 6px;
   align-items: start;
 }
@@ -295,6 +295,7 @@ svg {
   white-space: nowrap;
 }
 .player-heading {
+  flex-shrink: 0;
   height: 36px;
   display: flex;
   align-items: center;
@@ -920,7 +921,7 @@ dialog::backdrop {
 }
 @media (min-width: 1650px) {
   .player-grid {
-    grid-template-columns: repeat(auto-fit, minmax(530px, 1fr));
+    --player-min-width: 530px;
   }
 }
 @media (max-width: 700px) {
@@ -1063,6 +1064,27 @@ dialog::backdrop {
 }
 .watch-mode .workspace:not(.empty) {
   flex: 1;
+}
+.balanced-grid {
+  height: 100dvh;
+}
+.balanced-grid .workspace:not(.empty) {
+  flex: 1;
+  display: flex;
+  min-height: min-content;
+}
+.balanced-grid .player-grid {
+  width: 100%;
+  flex: 1;
+  align-items: stretch;
+}
+.balanced-grid .player-tile {
+  display: flex;
+  flex-direction: column;
+}
+.balanced-grid .player-frame {
+  flex: 1;
+  aspect-ratio: auto;
 }
 @media (max-width: 700px) {
   .add-bar textarea {

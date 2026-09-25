@@ -50,7 +50,7 @@ import { seekBarrier } from './seekBarrier';
 import { anyPlaying, startDecision, startProgress } from './playbackStart';
 import { readStorage, writeStorage } from './storage';
 import { supportsPlayback } from './capabilities';
-import { useGridColumns } from './useGridColumns';
+import { useGridLayout } from './useGridLayout';
 
 const SESSION_KEY = 'vodsync.session.v1'; // Preserve and migrate existing workspaces.
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : 'Please retry.');
@@ -127,7 +127,7 @@ export default function App() {
   const [orderAnnouncement, setOrderAnnouncement] = useState('');
   const [removed, setRemoved] = useState<{ vod: Vod; index: number; moment: number }>();
   const [watchMode, setWatchMode] = useState(false);
-  const { grid, columns } = useGridColumns(vods.length);
+  const { grid, columns, rows, tracks, positions } = useGridLayout(vods.length);
   const [timelineCollapsed, setTimelineCollapsed] = useState(
     () => readStorage('vodsync.timelineCollapsed') === 'true',
   );
@@ -557,7 +557,9 @@ export default function App() {
     ? seekBarrier(vods, command.moment, command.serial, playbackStates)
     : null;
   return (
-    <div className={`app-shell ${watchMode ? 'watch-mode' : ''}`}>
+    <div
+      className={`app-shell ${watchMode ? 'watch-mode' : ''} ${vods.length > 3 ? 'balanced-grid' : ''}`}
+    >
       <div className="sr-only" role="status" aria-live="polite">
         {orderAnnouncement}
       </div>
@@ -715,7 +717,14 @@ export default function App() {
             </p>
           </div>
         ) : (
-          <div ref={grid} className={`player-grid ${draggingKey ? 'is-reordering' : ''}`}>
+          <div
+            ref={grid}
+            className={`player-grid ${draggingKey ? 'is-reordering' : ''}`}
+            style={{
+              gridTemplateColumns: `repeat(${tracks}, minmax(0, 1fr))`,
+              gridTemplateRows: `repeat(${rows}, minmax(338px, 1fr))`,
+            }}
+          >
             {/* Keep iframe DOM positions stable: moving an iframe reloads Twitch even with React keys. */}
             {[...vods]
               .sort((a, b) => vodKey(a).localeCompare(vodKey(b)))
@@ -755,6 +764,7 @@ export default function App() {
                   }
                   order={{
                     index: vods.indexOf(vod),
+                    position: positions[vods.indexOf(vod)],
                     count: vods.length,
                     disabled: busy || vods.length < 2,
                     dragging: draggingKey === vodKey(vod),
