@@ -1,0 +1,42 @@
+import type { Session } from '@vodsync/core';
+export const demoSession: Session = {
+  version: 2,
+  leaderKey: 'twitch:100000001',
+  momentMs: Date.parse('2026-09-25T18:35:00Z'),
+  view: 'grid',
+  vods: [
+    {
+      platform: 'twitch',
+      id: '100000001',
+      url: 'https://www.twitch.tv/videos/100000001',
+      title: 'A different perspective · Sample footage',
+      channel: 'Meridian',
+      startedAt: '2026-09-25T18:00:00Z',
+      durationSeconds: 7200,
+      correctionSeconds: 0,
+      provenance: 'demo',
+    },
+    {
+      platform: 'twitch',
+      id: '100000002',
+      url: 'https://www.twitch.tv/videos/100000002',
+      title: 'The other side · Sample footage',
+      channel: 'Orbit',
+      startedAt: '2026-09-25T18:20:00Z',
+      durationSeconds: 5400,
+      correctionSeconds: 0,
+      provenance: 'demo',
+    },
+    {
+      platform: 'twitch',
+      id: '100000003',
+      url: 'https://www.twitch.tv/videos/100000003',
+      title: 'Earlier in the evening · Sample footage',
+      channel: 'Nova',
+      startedAt: '2026-09-25T17:40:00Z',
+      durationSeconds: 2400,
+      correctionSeconds: 0,
+      provenance: 'demo',
+    },
+  ],
+};

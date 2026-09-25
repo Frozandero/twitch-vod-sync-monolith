@@ -1,0 +1,29 @@
+{
+  "name": "twitch-vod-sync-monolith",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "dev": "npm run dev -w @vodsync/web",
+    "build": "npm run build -w @vodsync/web",
+    "preview": "npm run preview -w @vodsync/web",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "check": "npm run typecheck && npm test && npm run build",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "prettier": "^3.9.9",
+    "typescript": "^5.9.3",
+    "vitest": "^5.0.2"
+  }
+}
