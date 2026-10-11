@@ -1,8 +1,14 @@
 # Verification status
 
-Last updated: 2026-09-25.
+Last updated: 2026-10-11.
 
 This file records actual checks and their limits. A passing build does not prove third-party playback is available.
+
+## Local time toggle — 2026-10-11
+
+- `npm ci` and `npm run check` passed: TypeScript, all 207 existing tests, and the production build. The check used a workspace temporary directory after sandbox-isolated worker files caused an initial test-run failure.
+- An isolated Chrome browser with the `Europe/Istanbul` timezone checked a saved fixture at desktop 1440×1000 and mobile 390×844. Clicking UTC converted the selected date/time, ruler, recording-range tooltip, and seek accessibility text together; `2026-10-09 22:30:12 UTC` became `2026-10-10 01:30:12` local time. Enter switched back to UTC.
+- Screenshots were inspected with no page-level horizontal overflow. The selected moment, ISO datetime, timestamp links, recording offsets, and player node stayed unchanged. These were display checks with a simulated recording; third-party playback and physical mobile devices were not revalidated for this change.
 
 ## Automated coverage
 

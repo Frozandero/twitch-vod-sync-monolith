@@ -12,7 +12,19 @@ import {
 import { alignment, type PlaybackSnapshot } from './playback';
 import { supportsPlayback } from './capabilities';
 
-const clock = (ms: number) => new Date(ms).toISOString().slice(11, 19);
+const pad = (value: number) => String(value).padStart(2, '0');
+const clock = (ms: number, local: boolean) => {
+  const date = new Date(ms);
+  return local
+    ? [date.getHours(), date.getMinutes(), date.getSeconds()].map(pad).join(':')
+    : date.toISOString().slice(11, 19);
+};
+const calendarDate = (ms: number, local: boolean) => {
+  const date = new Date(ms);
+  return local
+    ? `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+    : date.toISOString().slice(0, 10);
+};
 export function TimelineToggle({
   collapsed,
   onToggle,
@@ -57,10 +69,13 @@ export function Timeline({
 }) {
   const { min, max } = timelineBounds(vods);
   const [draft, setDraft] = useState<number | null>(null);
+  const [localTime, setLocalTime] = useState(false);
   useEffect(() => {
     if (collapsed) setDraft(null);
   }, [collapsed]);
   const shown = draft ?? moment;
+  const zoneLabel = localTime ? 'Local' : 'UTC';
+  const localZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const duration = (max - min) / 1000;
   function commit() {
     if (draft !== null) {
@@ -104,18 +119,33 @@ export function Timeline({
             >
               {playing ? <Pause size={16} /> : <Play size={16} />}
             </button>
-            <time>
-              {new Date(shown).toISOString().slice(0, 10)} <strong>{clock(shown)}</strong> UTC
-            </time>
+            <div className="timeline-clock">
+              <time dateTime={new Date(shown).toISOString()}>
+                {calendarDate(shown, localTime)} <strong>{clock(shown, localTime)}</strong>
+              </time>
+              <button
+                className="timezone-toggle"
+                aria-label="Show timeline in local time"
+                aria-pressed={localTime}
+                title={
+                  localTime
+                    ? `Local time (${localZone}). Click to show UTC.`
+                    : `Click to show local time (${localZone}).`
+                }
+                onClick={() => setLocalTime((local) => !local)}
+              >
+                {zoneLabel}
+              </button>
+            </div>
             <span>Drag to select a moment</span>
           </>
         )}
       </div>
       <div id="timeline-seeker-area" hidden={collapsed}>
         <div className="timeline-ruler">
-          <span>{clock(min)}</span>
-          <span>{clock((min + max) / 2)}</span>
-          <span>{clock(max)}</span>
+          <span>{clock(min, localTime)}</span>
+          <span>{clock((min + max) / 2, localTime)}</span>
+          <span>{clock(max, localTime)}</span>
         </div>
         <div className="timeline-lanes">
           {vods.map((vod) => {
@@ -146,7 +176,7 @@ export function Timeline({
                 <div className="timeline-track">
                   <div
                     className={`timeline-range ${sync.state === 'aligned' ? 'active' : sync.state === 'drifted' ? 'drifted' : ''}`}
-                    title={`${vod.channel}: ${clock(startMs(vod))}–${clock(startMs(vod) + vod.durationSeconds * 1000)}`}
+                    title={`${vod.channel}: ${clock(startMs(vod), localTime)}–${clock(startMs(vod) + vod.durationSeconds * 1000, localTime)} ${zoneLabel}${localTime ? ` (${localZone})` : ''}`}
                     style={{
                       left: `${((startMs(vod) - min) / (max - min)) * 100}%`,
                       width: `${(vod.durationSeconds / duration) * 100}%`,
@@ -201,7 +231,7 @@ export function Timeline({
             max={duration}
             step="1"
             value={(shown - min) / 1000}
-            aria-valuetext={`${clock(shown)} UTC`}
+            aria-valuetext={`${calendarDate(shown, localTime)} ${clock(shown, localTime)} ${localTime ? `local time (${localZone})` : 'UTC'}`}
             onChange={(e) => setDraft(min + Number(e.target.value) * 1000)}
             onPointerUp={commit}
             onKeyUp={commit}

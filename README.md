@@ -34,6 +34,8 @@ Sessions save locally. Share them by URL or import/export JSON through the more-
 
 Current Kick VOD IDs are resolved through explicit mappings in Kick's older public metadata service. The app checks up to 50 recent channel recordings, reuses concurrent lookups, and caches metadata for five minutes. Older or unindexed recordings may fail because Kick's newer service blocks cross-origin browser requests. Missing parents, private/expired recordings, and incomplete broadcasts produce an error; there is no proxy or guessed broadcast date.
 
+Click **UTC** beside the shared date/time to switch all timeline clocks to your device's local timezone. Click **Local** to switch back. The date follows the selected timezone; recording offsets and timestamp links still refer to the same moment.
+
 ## Limitations
 
 - Anonymous Twitch metadata uses an undocumented endpoint and can change. An optional official Twitch connection is available.

@@ -24,6 +24,8 @@ The shared moment is independent of the last selected player's interval. This is
 
 GET Clips `vod_offset` and GraphQL `videoOffsetSeconds` are the clip start in the parent VOD. Add the clip-local offset; fetch the parent broadcast's start. Never use clip creation time or subtract clip duration. Reject automatic mapping of highlights/uploads.
 
+The timeline's UTC/Local button changes only wall-clock formatting, using the device timezone for the selected date/time, ruler, range tooltips, and seek accessibility text. Playback offsets, UTC arithmetic, and session data retain the same selected moment. This display choice stays within the mounted timeline and defaults to UTC on reload.
+
 ## Streamer target resolution
 
 `parseChannelTarget` distinguishes `twitch/name`, `kick/name`, and plain channel URLs from media references. It rejects credentials, unexpected hosts/ports, and query/hash variants, leaving query-style Kick clips on the clip path. `recordingInputs.ts` resolves explicit media first in bounded batches, applies the established first-successful-media anchor rule, then resolves streamer targets against that single captured UTC moment. Channel-only inputs require an existing session. Targets never choose the source; additions preserve paste order, canonical-ID deduplication, existing corrections, and loaded durations. Each failed input is retained for correction without discarding successful additions or existing VODs. Only concrete normalized VODs are saved; no ongoing channel subscription is created.
