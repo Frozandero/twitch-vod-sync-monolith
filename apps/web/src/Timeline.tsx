@@ -1,244 +1,236 @@
-import { useEffect, useState } from 'react';
-import { ChevronDown, ChevronUp, ExternalLink, Pause, Play, X } from 'lucide-react';
+import { useRef } from 'react';
+import { ArrowUpRight, X } from 'lucide-react';
 import {
   formatTime,
   matchDescription,
   matchMoment,
   startMs,
-  timelineBounds,
   vodKey,
+  type ClipMarker,
   type Vod,
 } from '@vodsync/core';
-import { alignment, type PlaybackSnapshot } from './playback';
-import { supportsPlayback } from './capabilities';
+import type { PlaybackSnapshot } from './playback';
+import { DRIFT_LIMIT, driftSeconds } from './syncSummary';
+import { percentOf, rulerTicks, type Range } from './timelineScale';
+import { calendarDate, clock, formatDelta, shortClock } from './timeFormat';
+import { Kbd, PlatformMark } from './ui';
 
-const pad = (value: number) => String(value).padStart(2, '0');
-const clock = (ms: number, local: boolean) => {
-  const date = new Date(ms);
-  return local
-    ? [date.getHours(), date.getMinutes(), date.getSeconds()].map(pad).join(':')
-    : date.toISOString().slice(11, 19);
-};
-const calendarDate = (ms: number, local: boolean) => {
-  const date = new Date(ms);
-  return local
-    ? `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
-    : date.toISOString().slice(0, 10);
-};
-export function TimelineToggle({
-  collapsed,
-  onToggle,
-}: {
-  collapsed: boolean;
-  onToggle: () => void;
-}) {
-  return (
-    <button
-      className="icon-button timeline-toggle"
-      aria-label={collapsed ? 'Show timeline' : 'Hide timeline'}
-      title={collapsed ? 'Show timeline' : 'Hide timeline'}
-      aria-expanded={!collapsed}
-      aria-controls="timeline-seeker-area"
-      onClick={onToggle}
-    >
-      {collapsed ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-    </button>
-  );
-}
+const zoneOffset = (ms: number, local: boolean) =>
+  local ? -new Date(ms).getTimezoneOffset() * 60000 : 0;
 
 export function Timeline({
   vods,
+  clips,
+  range,
   moment,
-  playing,
-  preparing,
+  draft,
+  onDraft,
+  localTime,
+  leaderKey,
   playbackStates,
   onSeek,
-  onPlayback,
   onRemove,
-  collapsed,
+  onClose,
 }: {
   vods: Vod[];
+  clips: ClipMarker[];
+  range: Range;
   moment: number;
-  playing: boolean;
-  preparing: boolean;
+  draft: number | null;
+  onDraft: (moment: number | null) => void;
+  localTime: boolean;
+  leaderKey: string;
   playbackStates: Record<string, PlaybackSnapshot>;
   onSeek: (moment: number) => void;
-  onPlayback: () => void;
   onRemove: (vod: Vod) => void;
-  collapsed: boolean;
+  onClose: () => void;
 }) {
-  const { min, max } = timelineBounds(vods);
-  const [draft, setDraft] = useState<number | null>(null);
-  const [localTime, setLocalTime] = useState(false);
-  useEffect(() => {
-    if (collapsed) setDraft(null);
-  }, [collapsed]);
   const shown = draft ?? moment;
-  const zoneLabel = localTime ? 'Local' : 'UTC';
-  const localZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-  const duration = (max - min) / 1000;
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+  const zone = localTime ? 'local time' : 'UTC';
+  const inView = shown >= range.min && shown <= range.max;
+  const selected = Math.max(0, Math.min(100, percentOf(range, shown)));
+  const ticks = rulerTicks(range, 6, zoneOffset(range.min, localTime));
+  const span = (range.max - range.min) / 1000;
+  const byKey = new Map(vods.map((vod) => [vodKey(vod), vod]));
   function commit() {
-    if (draft !== null) {
-      onSeek(draft);
-      setDraft(null);
-    }
+    if (draftRef.current === null) return;
+    onSeek(draftRef.current);
+    onDraft(null);
   }
   return (
-    <section className="timeline" aria-label="Shared broadcast timeline" hidden={collapsed}>
-      <div className="timeline-toolbar">
-        {!collapsed && (
-          <>
-            <button
-              className="icon-button"
-              aria-label={
-                preparing
-                  ? playing
-                    ? 'Stay paused after buffering'
-                    : 'Play when all VODs are ready'
-                  : playing
-                    ? 'Pause all players'
-                    : 'Play matching players'
-              }
-              title={
-                preparing
-                  ? playing
-                    ? 'Stay paused after buffering'
-                    : 'Play when all VODs are ready'
-                  : playing
-                    ? 'Pause all players'
-                    : 'Play matching players'
-              }
-              onClick={onPlayback}
-              disabled={
-                !playing &&
-                !preparing &&
-                !vods.some(
-                  (vod) => supportsPlayback(vod) && matchMoment(vod, moment).state === 'playing',
-                )
-              }
-            >
-              {playing ? <Pause size={16} /> : <Play size={16} />}
-            </button>
-            <div className="timeline-clock">
-              <time dateTime={new Date(shown).toISOString()}>
-                {calendarDate(shown, localTime)} <strong>{clock(shown, localTime)}</strong>
-              </time>
-              <button
-                className="timezone-toggle"
-                aria-label="Show timeline in local time"
-                aria-pressed={localTime}
-                title={
-                  localTime
-                    ? `Local time (${localZone}). Click to show UTC.`
-                    : `Click to show local time (${localZone}).`
-                }
-                onClick={() => setLocalTime((local) => !local)}
-              >
-                {zoneLabel}
-              </button>
-            </div>
-            <span>Drag to select a moment</span>
-          </>
-        )}
+    <div className="timeline" id="timeline-lanes">
+      <div className="tl-sheet-head">
+        <h2>Timeline</h2>
+        <button className="icon-btn" aria-label="Close timeline" onClick={onClose}>
+          <X size={18} />
+        </button>
       </div>
-      <div id="timeline-seeker-area" hidden={collapsed}>
-        <div className="timeline-ruler">
-          <span>{clock(min, localTime)}</span>
-          <span>{clock((min + max) / 2, localTime)}</span>
-          <span>{clock(max, localTime)}</span>
+      <div className="tl-head">
+        <div className="tl-key">
+          <button type="button" className="tl-key-button" aria-describedby="timeline-key">
+            Key
+          </button>
+          <div className="tl-key-pop" id="timeline-key" role="tooltip">
+            <span>
+              <i className="key-selected" /> Selected moment
+            </span>
+            <span>
+              <i className="key-aligned" /> Player within {DRIFT_LIMIT} s
+            </span>
+            <span>
+              <i className="key-drifted" /> Player drifting
+            </span>
+            <span>
+              <i className="key-clip" /> Clip moment
+            </span>
+            <span className="key-shortcuts">
+              <Kbd>←</Kbd>
+              <Kbd>→</Kbd> 5 s <Kbd>J</Kbd>
+              <Kbd>L</Kbd> 10 s
+            </span>
+          </div>
         </div>
-        <div className="timeline-lanes">
-          {vods.map((vod) => {
-            const match = matchMoment(vod, shown);
-            const playback = playbackStates[vodKey(vod)];
-            const sync = alignment(vod, shown, playback);
-            const actualMoment =
-              playback?.status === 'ready' && playback.seconds !== null
-                ? startMs(vod) + playback.seconds * 1000
-                : null;
-            const description =
-              match.state !== 'playing'
-                ? matchDescription(match)
-                : `Selected timestamp ${formatTime(match.offsetSeconds)} · ${sync.label || 'Player within 2 seconds'}`;
-            return (
-              <div className={`timeline-row ${match.state}`} key={vodKey(vod)}>
-                <div className="timeline-recording">
+        <div className="tl-ruler" aria-hidden="true">
+          {ticks
+            .filter((tick) => !inView || Math.abs(percentOf(range, tick) - selected) > 7)
+            .map((tick) => (
+              <span key={tick} style={{ left: `${percentOf(range, tick)}%` }}>
+                {shortClock(tick, localTime)}
+              </span>
+            ))}
+          {inView && (
+            <b className="tl-moment" style={{ left: `${selected}%` }}>
+              {clock(shown, localTime)}
+            </b>
+          )}
+        </div>
+        <span />
+      </div>
+      <div className="tl-body">
+        {vods.map((vod) => {
+          const key = vodKey(vod);
+          const match = matchMoment(vod, shown);
+          const playback = playbackStates[key];
+          const drift = driftSeconds(vod, shown, playback);
+          const actual =
+            playback?.status === 'ready' && playback.seconds !== null
+              ? startMs(vod) + playback.seconds * 1000
+              : null;
+          const start = percentOf(range, startMs(vod));
+          const end = percentOf(range, startMs(vod) + vod.durationSeconds * 1000);
+          const left = Math.max(0, start);
+          const width = Math.max(0, Math.min(100, end) - left);
+          const source = key === leaderKey;
+          return (
+            <div className={`tl-row ${match.state}`} key={key}>
+              <div className="tl-name" title={vod.title}>
+                <PlatformMark platform={vod.platform} />
+                <span>{vod.channel}</span>
+              </div>
+              <div className="tl-track">
+                {width > 0 && (
+                  <span
+                    className="tl-range"
+                    title={`${vod.channel}: ${clock(startMs(vod), localTime)}–${clock(startMs(vod) + vod.durationSeconds * 1000, localTime)} ${localTime ? 'local' : 'UTC'}`}
+                    style={{ left: `${left}%`, width: `${width}%` }}
+                  />
+                )}
+                {inView && <span className="tl-selected" style={{ left: `${selected}%` }} />}
+                {actual !== null && actual >= range.min && actual <= range.max && (
+                  <span
+                    className={`tl-player ${drift !== null && Math.abs(drift) > DRIFT_LIMIT ? 'drifted' : 'aligned'}`}
+                    role="img"
+                    aria-label={`${vod.channel} player at ${formatTime(playback!.seconds!)}`}
+                    title={`Player ${formatTime(playback!.seconds!)}${drift !== null ? ` · ${formatDelta(drift)}` : ''}`}
+                    style={{ left: `${percentOf(range, actual)}%` }}
+                  />
+                )}
+              </div>
+              <div className="tl-meta" title={matchDescription(match)}>
+                {match.state === 'playing' ? (
+                  <time>{formatTime(match.offsetSeconds)}</time>
+                ) : (
+                  <span className="tl-boundary">
+                    {match.state === 'before' ? 'not started' : 'ended'}
+                  </span>
+                )}
+                {drift !== null && !source && (
+                  <span className={`tl-delta ${Math.abs(drift) > DRIFT_LIMIT ? 'drifted' : ''}`}>
+                    {formatDelta(drift)}
+                  </span>
+                )}
+                <span className="tl-meta-actions">
+                  <a
+                    className="icon-btn small"
+                    href={match.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    aria-label={
+                      match.state === 'playing'
+                        ? `Open ${vod.channel} at ${formatTime(match.offsetSeconds)}`
+                        : `Open ${vod.channel} VOD ${match.state === 'before' ? 'start' : 'end'}`
+                    }
+                    title={
+                      match.state === 'playing'
+                        ? `Open at ${formatTime(match.offsetSeconds)}`
+                        : `Open VOD ${match.state === 'before' ? 'start' : 'end'} · ${matchDescription(match)}`
+                    }
+                  >
+                    <ArrowUpRight size={14} />
+                  </a>
                   <button
-                    className="icon-button timeline-remove"
-                    aria-label={`Remove ${vod.channel}`}
-                    title={`Remove ${vod.channel} recording`}
+                    className="icon-btn small subtle"
+                    aria-label={`Close ${vod.channel}`}
+                    title={`Close ${vod.channel}`}
                     onClick={() => onRemove(vod)}
                   >
-                    <X size={13} />
+                    <X size={14} />
                   </button>
-                  <span title={vod.channel}>{vod.channel}</span>
-                </div>
-                <div className="timeline-track">
-                  <div
-                    className={`timeline-range ${sync.state === 'aligned' ? 'active' : sync.state === 'drifted' ? 'drifted' : ''}`}
-                    title={`${vod.channel}: ${clock(startMs(vod), localTime)}–${clock(startMs(vod) + vod.durationSeconds * 1000, localTime)} ${zoneLabel}${localTime ? ` (${localZone})` : ''}`}
-                    style={{
-                      left: `${((startMs(vod) - min) / (max - min)) * 100}%`,
-                      width: `${(vod.durationSeconds / duration) * 100}%`,
-                    }}
-                  />
-                  <i
-                    title="Selected broadcast moment"
-                    style={{ left: `${((shown - min) / (max - min)) * 100}%` }}
-                  />
-                  {actualMoment !== null && (
-                    <b
-                      className={`actual-playhead ${sync.state}`}
-                      role="img"
-                      aria-label={`${vod.channel} player position ${formatTime(playback!.seconds!)}`}
-                      title={`Player: ${formatTime(playback!.seconds!)}${sync.label ? ` · ${sync.label}` : ''}`}
-                      style={{
-                        left: `${Math.max(0, Math.min(100, ((actualMoment - min) / (max - min)) * 100))}%`,
-                      }}
-                    />
-                  )}
-                </div>
-                <div className={`timeline-position ${sync.state}`} title={description}>
-                  <time>{formatTime(match.offsetSeconds)}</time>
-                  {sync.label && <small>{sync.label}</small>}
-                </div>
-                <a
-                  className="icon-button timeline-link"
-                  href={match.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  aria-label={
-                    match.state === 'playing'
-                      ? `Go to ${vod.channel} at ${formatTime(match.offsetSeconds)}`
-                      : `Open ${vod.channel} VOD ${match.state === 'before' ? 'start' : 'end'} — ${matchDescription(match)}`
-                  }
-                  title={
-                    match.state === 'playing'
-                      ? `Go to timestamp ${formatTime(match.offsetSeconds)}`
-                      : `Open VOD ${match.state === 'before' ? 'start' : 'end'} · ${matchDescription(match)}`
-                  }
-                >
-                  <ExternalLink size={14} />
-                </a>
+                </span>
               </div>
-            );
-          })}
+            </div>
+          );
+        })}
+        <div className="tl-overlay">
           <input
-            className="timeline-seeker"
+            className="tl-seeker"
             type="range"
             aria-label="Seek all recordings"
             min={0}
-            max={duration}
+            max={span}
             step="1"
-            value={(shown - min) / 1000}
-            aria-valuetext={`${calendarDate(shown, localTime)} ${clock(shown, localTime)} ${localTime ? `local time (${localZone})` : 'UTC'}`}
-            onChange={(e) => setDraft(min + Number(e.target.value) * 1000)}
+            value={Math.max(0, Math.min(span, (shown - range.min) / 1000))}
+            aria-valuetext={`${calendarDate(shown, localTime)} ${clock(shown, localTime)} ${zone}`}
+            onChange={(e) => onDraft(range.min + Number(e.target.value) * 1000)}
             onPointerUp={commit}
             onKeyUp={commit}
             onBlur={commit}
           />
+          {clips.map((clip) => {
+            const vod = byKey.get(clip.vodKey);
+            if (!vod) return null;
+            const at = startMs(vod) + clip.offsetSeconds * 1000;
+            if (at < range.min || at > range.max) return null;
+            const row = vods.indexOf(vod);
+            return (
+              <button
+                key={`${clip.platform}:${clip.id}`}
+                type="button"
+                className="tl-clip"
+                aria-label={`Go to clip ${clip.id} at ${formatTime(clip.offsetSeconds)} in ${vod.channel}`}
+                title={`Clip ${clip.id} · ${vod.channel} ${formatTime(clip.offsetSeconds)}`}
+                style={{
+                  left: `${percentOf(range, at)}%`,
+                  top: `calc(${row} * var(--tl-row) + var(--tl-clip-y))`,
+                }}
+                onClick={() => onSeek(at)}
+              />
+            );
+          })}
         </div>
       </div>
-    </section>
+    </div>
   );
 }

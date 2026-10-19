@@ -1,22 +1,19 @@
-import { useEffect, useRef, useState, type DragEventHandler, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type DragEventHandler } from 'react';
 import {
-  ExternalLink,
+  ArrowUpRight,
   GripVertical,
   LoaderCircle,
+  MoreHorizontal,
   RefreshCw,
-  SlidersHorizontal,
+  RotateCw,
   Volume2,
   VolumeX,
-  X,
 } from 'lucide-react';
-import {
-  formatTime,
-  matchDescription,
-  matchMoment,
-  timestampUrl,
-  vodKey,
-  type Vod,
-} from '@vodsync/core';
+import { formatTime, matchMoment, startMs, timestampUrl, vodKey, type Vod } from '@vodsync/core';
+import { DRIFT_LIMIT } from './syncSummary';
+import { formatDelta } from './timeFormat';
+import { TimingPanel } from './TimingPanel';
+import { Menu, PlatformMark } from './ui';
 import { createPlayerClock } from './playerClock';
 import { createVodGuard, type PlaybackSnapshot, type StopReason } from './playback';
 import { createSeekPreparation, seekPosition, type SeekState } from './seekBarrier';
@@ -101,10 +98,17 @@ type Props = {
   register: (key: string, handle: PlayerHandle | null) => void;
   onSync: (vod: Vod) => void;
   onRemove: () => void;
-  onSettings: () => void;
   onStopped: (vod: Vod, reason: StopReason) => void;
   onDuration: (key: string, seconds: number) => void;
-  workspaceControls?: ReactNode;
+  // Verified drift against the selected moment, sampled with the shared clock.
+  drift: number | null;
+  sourceName: string;
+  audioKey: string;
+  onSolo: () => void;
+  onSeekTo: (offsetSeconds: number) => void;
+  onJump: (moment: number) => void;
+  onCorrect: (seconds: number) => void;
+  onCopy: (url: string) => void;
   order: {
     index: number;
     position: GridPosition;
@@ -128,12 +132,21 @@ export function Player({
   register,
   onSync,
   onRemove,
-  onSettings,
   onStopped,
   onDuration,
-  workspaceControls,
+  drift,
+  sourceName,
+  audioKey,
+  onSolo,
+  onSeekTo,
+  onJump,
+  onCorrect,
+  onCopy,
   order,
 }: Props) {
+  const moreButton = useRef<HTMLButtonElement>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [timingOpen, setTimingOpen] = useState(false);
   const container = useRef<HTMLDivElement>(null);
   const player = useRef<Omit<PlayerHandle, 'getSnapshot'> | null>(null);
   const clock = useRef<ReturnType<typeof createPlayerClock> | null>(null);
@@ -183,6 +196,22 @@ export function Player({
   durationCallback.current = onDuration;
   const vodRef = useRef(vod);
   vodRef.current = vod;
+  // A soloed player keeps the audio across seeks; otherwise the source plays sound.
+  const audioRef = useRef(audioKey);
+  audioRef.current = audioKey;
+  const audible = (leader: string) =>
+    audioRef.current ? audioRef.current === key : leader === key;
+  useEffect(() => {
+    const handle = player.current;
+    if (!ready || !handle || !command || blockedStatus || command.phase === 'preparing') return;
+    const silent = !audible(command.leader) || forceMuted.current;
+    try {
+      handle.setMuted(silent);
+      setMuted(silent);
+    } catch {
+      /* The player will apply audio on its next command. */
+    }
+  }, [audioKey]);
   useEffect(() => {
     if (external) return;
     let alive = true,
@@ -562,7 +591,7 @@ export function Player({
         setError('The player is not ready to seek. Press play, then sync again.');
       }
     };
-    const silent = command.phase === 'preparing' || command.leader !== key || forceMuted.current;
+    const silent = command.phase === 'preparing' || !audible(command.leader) || forceMuted.current;
     handle.setMuted(silent);
     setMuted(silent);
     move();
@@ -579,7 +608,7 @@ export function Player({
       return;
     }
     if (guard.current && !guard.current.check()) return;
-    const silent = command.leader !== key || forceMuted.current;
+    const silent = !audible(command.leader) || forceMuted.current;
     handle.setMuted(silent);
     setMuted(silent);
     if (!command.playing) {
@@ -619,9 +648,68 @@ export function Player({
     }, 500);
     return () => clearInterval(timer);
   }, [ready]);
+  const end = startMs(vod) + vod.durationSeconds * 1000;
+  const time = formatTime(external ? match.offsetSeconds : current);
+  const link = timestampUrl(vod, linkOffset);
+  const platformName = vod.platform === 'kick' ? 'Kick' : 'Twitch';
+  const status: { text: string; tone: string; spin?: boolean; title?: string } | null = error
+    ? { text: error, tone: 'signal', title: error }
+    : holding && !blockedStatus
+      ? {
+          text:
+            command?.phase === 'starting'
+              ? 'starting'
+              : seekState === 'ready'
+                ? 'ready'
+                : 'buffering',
+          tone: 'muted',
+          spin: command?.phase === 'starting' || seekState !== 'ready',
+          title: holdLabel,
+        }
+      : external
+        ? { text: 'link only', tone: 'muted' }
+        : blockedStatus === 'before'
+          ? { text: 'not started', tone: 'muted' }
+          : blockedStatus === 'ended'
+            ? { text: 'ended', tone: 'muted' }
+            : blockedStatus === 'changed'
+              ? { text: 'stopped', tone: 'warning' }
+              : drift !== null && Math.abs(drift) > DRIFT_LIMIT
+                ? {
+                    text: formatDelta(drift),
+                    tone: 'warning',
+                    title: `This player is ${formatDelta(drift)} from the selected moment`,
+                  }
+                : null;
+  const boundary =
+    !external && blockedStatus
+      ? blockedStatus === 'before'
+        ? {
+            title: `Starts in ${formatTime(match.gapSeconds)}`,
+            detail: `Live at ${new Date(startMs(vod)).toISOString().slice(11, 19)} UTC`,
+            action: 'Move everyone to its start',
+            run: () => onJump(startMs(vod)),
+          }
+        : blockedStatus === 'changed'
+          ? {
+              title: 'Twitch switched to another video',
+              detail: 'Stopped to keep the clock right',
+              action: `Reload ${vod.channel}’s VOD`,
+              run: () => setStopped(undefined),
+            }
+          : {
+              title:
+                match.state === 'ended'
+                  ? `Ended ${formatTime(match.gapSeconds)} earlier`
+                  : 'This VOD has ended',
+              detail: 'Seek earlier to bring it back',
+              action: 'Go to its last minute',
+              run: () => onJump(end - Math.min(60000, (vod.durationSeconds * 1000) / 2)),
+            }
+      : null;
   return (
     <article
-      className={`player-tile ${source ? 'is-source' : ''} ${order.dragging ? 'is-dragging' : ''} ${order.target ? 'is-drop-target' : ''}`}
+      className={`tile ${source ? 'is-source' : ''} ${order.dragging ? 'is-dragging' : ''} ${order.target ? 'is-drop-target' : ''}`}
       aria-label={`${vod.channel} player`}
       data-vod-key={key}
       style={{
@@ -632,9 +720,9 @@ export function Player({
       onDragOver={order.onOver}
       onDrop={order.onDrop}
     >
-      <div className="player-heading">
+      <div className="tile-head">
         <button
-          className="icon-button reorder-handle"
+          className="icon-btn reorder-handle"
           aria-label={`Reorder ${vod.channel}, position ${order.index + 1} of ${order.count}`}
           aria-haspopup="dialog"
           title="Drag to reorder, or click to arrange. Arrow keys move; Home/End move to first/last."
@@ -659,36 +747,69 @@ export function Player({
             order.onMove(position);
           }}
         >
-          <GripVertical size={15} />
+          <GripVertical size={14} />
         </button>
-        <strong title={vod.title}>{vod.channel}</strong>
-        {vod.platform === 'kick' && <span className="provider-label">Kick</span>}
-        {holding && !blockedStatus && (
-          <span className="seek-hold" role="status" title={holdLabel} aria-label={holdLabel}>
-            <LoaderCircle className="spin" size={14} />
+        <PlatformMark platform={vod.platform} />
+        <strong className="tile-name" title={vod.title}>
+          {vod.channel}
+        </strong>
+        {source && (
+          <span className="tile-source" title="Reference clock and audio for the session">
+            source
           </span>
         )}
-        <time>{formatTime(external ? match.offsetSeconds : current)}</time>
-        <div className="player-actions">
+        <span className="tile-spacer" />
+        {status && (
+          <span className={`tile-status ${status.tone}`} role="status" title={status.title}>
+            {status.spin && <LoaderCircle className="spin" size={12} aria-hidden="true" />}
+            <span>{status.text}</span>
+          </span>
+        )}
+        <a
+          className="tile-time"
+          href={link}
+          target="_blank"
+          rel="noreferrer"
+          aria-label={`Open ${vod.channel} on ${platformName} at ${formatTime(linkOffset)}`}
+          title={`Open on ${platformName} at ${formatTime(linkOffset)}`}
+        >
+          <time>{time}</time>
+          <ArrowUpRight size={12} aria-hidden="true" />
+        </a>
+        <div className="tile-actions">
+          {error && (
+            <button
+              className="icon-btn"
+              aria-label={`Retry ${vod.channel}`}
+              title="Retry"
+              onClick={() => {
+                setError('');
+                setAttempt((n) => n + 1);
+              }}
+            >
+              <RotateCw size={15} />
+            </button>
+          )}
           {!external && (
             <>
               <button
-                className={`sync-button ${source ? 'selected' : ''}`}
+                className="icon-btn"
+                aria-label={`Sync everyone to ${vod.channel}`}
                 disabled={!ready || !clockReady || holding}
                 onClick={() => onSync(vod)}
                 title={
                   clockReady
-                    ? `Sync all players to ${vod.channel}`
+                    ? 'Sync everyone to this moment'
                     : 'Wait for the player to load, or press play to enable sync'
                 }
               >
-                <RefreshCw size={13} />
-                <span>Sync</span>
+                <RefreshCw size={15} />
               </button>
               <button
-                className="icon-button"
+                className={`icon-btn ${muted ? 'subtle' : 'on'}`}
                 disabled={!ready || holding}
                 aria-label={`${muted ? 'Unmute' : 'Mute'} ${vod.channel}`}
+                title={muted ? 'Unmute' : 'Mute'}
                 onClick={() => {
                   player.current?.setMuted(!muted);
                   forceMuted.current = false;
@@ -701,49 +822,56 @@ export function Player({
             </>
           )}
           <button
-            className="icon-button"
-            onClick={onSettings}
-            aria-label={`Settings for ${vod.channel}`}
-            title="Recording settings"
+            ref={moreButton}
+            className="icon-btn"
+            aria-label={`More for ${vod.channel}`}
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
+            onClick={() => setMenuOpen((open) => !open)}
           >
-            <SlidersHorizontal size={14} />
+            <MoreHorizontal size={16} />
           </button>
-          <a
-            className="icon-button"
-            href={timestampUrl(vod, linkOffset)}
-            target="_blank"
-            rel="noreferrer"
-            aria-label={`Open ${vod.channel} VOD`}
-            title={
-              match && match.state !== 'playing'
-                ? `Open VOD boundary · ${matchDescription(match)}`
-                : `Go to timestamp ${formatTime(linkOffset)}`
-            }
-          >
-            <ExternalLink size={14} />
-          </a>
-          <button className="icon-button" onClick={onRemove} aria-label={`Remove ${vod.channel}`}>
-            <X size={16} />
-          </button>
-          {workspaceControls && <div className="workspace-controls">{workspaceControls}</div>}
         </div>
       </div>
-      <div className="player-frame">
+      <Menu
+        anchor={moreButton}
+        open={menuOpen}
+        onClose={() => setMenuOpen(false)}
+        label={`${vod.channel} actions`}
+        items={[
+          { label: 'Timing', onSelect: () => setTimingOpen(true) },
+          {
+            label: `Listen to ${vod.channel} only`,
+            onSelect: onSolo,
+            disabled: external || !ready || audioKey === key,
+          },
+          { label: 'Copy timestamp link', onSelect: () => onCopy(link) },
+          { label: 'Move to position', onSelect: order.onArrange, disabled: order.disabled },
+          'separator',
+          { label: `Close ${vod.channel}`, onSelect: onRemove, danger: true },
+        ]}
+      />
+      <TimingPanel
+        anchor={moreButton}
+        open={timingOpen}
+        onClose={() => setTimingOpen(false)}
+        vod={vod}
+        moment={moment}
+        drift={drift}
+        source={source}
+        sourceName={sourceName}
+        onSeek={onSeekTo}
+        onCorrect={onCorrect}
+      />
+      <div className="tile-frame">
         {external ? (
-          <div className="external-recording">
-            <strong>{vod.title}</strong>
-            <time>{formatTime(match.offsetSeconds)}</time>
-            <p>{matchDescription(match)}</p>
-            <a className="button" href={match.url} target="_blank" rel="noreferrer">
-              <ExternalLink size={15} />
-              {match.state === 'playing'
-                ? 'Open on Kick at this time'
-                : `Open Kick VOD ${match.state === 'before' ? 'start' : 'end'}`}
+          <div className="frame-panel">
+            <strong>Can’t play this recording here</strong>
+            <span>The link still follows the selected moment</span>
+            <a className="outline-btn" href={match.url} target="_blank" rel="noreferrer">
+              Open at {formatTime(match.offsetSeconds)}
+              <ArrowUpRight size={13} aria-hidden="true" />
             </a>
-            <button className="text-button" onClick={onSettings}>
-              Choose source timestamp
-            </button>
-            <small>In-app playback is unavailable for this recording.</small>
           </div>
         ) : demo ? (
           <div className="demo-screen">
@@ -765,38 +893,16 @@ export function Player({
             ref={container}
           />
         )}
-        {!external && blockedStatus && (
-          <div className="boundary-state">
-            <strong>
-              {blockedStatus === 'before'
-                ? 'This VOD hasn’t started'
-                : blockedStatus === 'changed'
-                  ? 'Twitch tried to switch VODs'
-                  : 'This VOD has ended'}
-            </strong>
-            <p>
-              {blockedStatus === 'changed'
-                ? 'Playback stopped to keep the correct recording.'
-                : match.state === 'playing'
-                  ? 'Seek to an earlier moment to replay.'
-                  : matchDescription(match)}
-            </p>
-            {blockedStatus === 'changed' && (
-              <button className="button" onClick={() => setStopped(undefined)}>
-                Reload original VOD
-              </button>
-            )}
+        {boundary && (
+          <div className="frame-panel boundary">
+            <strong>{boundary.title}</strong>
+            <span>{boundary.detail}</span>
+            <button className="outline-btn" onClick={boundary.run}>
+              {boundary.action}
+            </button>
           </div>
         )}
       </div>
-      {error && (
-        <div className="player-error" role="status">
-          {error}
-          <button className="text-button" onClick={() => setAttempt((n) => n + 1)}>
-            Retry
-          </button>
-        </div>
-      )}
     </article>
   );
 }

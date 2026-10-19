@@ -32,6 +32,7 @@ const session: Session = {
   leaderKey: 'twitch:123',
   momentMs: Date.parse(vod.startedAt) + 75000,
   view: 'links',
+  clips: [],
 };
 describe('timestamps', () => {
   it.each([
@@ -221,6 +222,33 @@ describe('untrusted saved sessions', () => {
       min: Date.parse(vod.startedAt),
       max: Date.parse('2026-09-26T00:00:00Z'),
     });
+  });
+  it('keeps valid clip markers and drops ones that do not fit a session recording', () => {
+    const clip = {
+      platform: 'twitch',
+      id: 'LastCircle-x7Kq',
+      url: 'https://clips.twitch.tv/LastCircle-x7Kq',
+      vodKey: 'twitch:123',
+      offsetSeconds: 300,
+    };
+    const restored = decodeSession(encodeSession({ ...session, clips: [clip as never] }));
+    expect(restored.clips).toEqual([clip]);
+    const checked = validateSession({
+      ...session,
+      clips: [
+        clip,
+        clip,
+        { ...clip, id: 'Other', url: 'https://clips.twitch.tv/Other', offsetSeconds: 7200 },
+        { ...clip, id: 'Missing', url: 'https://clips.twitch.tv/Missing', vodKey: 'twitch:999' },
+        { ...clip, id: 'Elsewhere', url: 'https://evil.com/Elsewhere' },
+        { ...clip, url: 'https://www.twitch.tv/videos/123' },
+        { ...clip, id: 'Nan', url: 'https://clips.twitch.tv/Nan', offsetSeconds: NaN },
+        'nope',
+      ],
+    });
+    expect(checked.clips).toEqual([clip]);
+    expect(validateSession({ ...session, clips: undefined }).clips).toEqual([]);
+    expect(() => validateSession({ ...session, clips: 'bad' })).toThrow();
   });
   it('rejects non-finite or out-of-timeline moments', () => {
     for (const momentMs of [NaN, Infinity, 0])

@@ -242,13 +242,54 @@ export function validateVod(input: unknown): Vod {
   };
 }
 
+// A clip marks a moment inside its resolved parent VOD, never its creation time.
+export type ClipMarker = {
+  platform: Platform;
+  id: string;
+  url: string;
+  vodKey: string;
+  offsetSeconds: number;
+};
 export type Session = {
   version: 2;
   vods: Vod[];
   leaderKey: string;
   momentMs: number;
   view: 'grid' | 'links';
+  clips: ClipMarker[];
 };
+// Markers are optional decoration: drop any that no longer fit their recording.
+export function validateClips(value: unknown, vods: Vod[]): ClipMarker[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) throw new Error('Invalid clip markers.');
+  const byKey = new Map(vods.map((vod) => [vodKey(vod), vod]));
+  const seen = new Set<string>();
+  const clips: ClipMarker[] = [];
+  for (const item of value.slice(0, MAX_VODS)) {
+    if (!item || typeof item !== 'object') continue;
+    const c = item as ClipMarker;
+    try {
+      const ref = parseMedia(String(c.url));
+      const vod = byKey.get(String(c.vodKey));
+      if (ref.kind !== 'clip' || ref.platform !== c.platform || ref.id !== c.id || !vod) continue;
+      if (!Number.isFinite(c.offsetSeconds) || c.offsetSeconds < 0) continue;
+      if (c.offsetSeconds >= vod.durationSeconds) continue;
+      const key = `${ref.platform}:${ref.id}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      clips.push({
+        platform: ref.platform,
+        id: ref.id,
+        url: ref.url,
+        vodKey: vodKey(vod),
+        offsetSeconds: c.offsetSeconds,
+      });
+    } catch {
+      /* Skip malformed markers. */
+    }
+  }
+  return clips;
+}
 export function validateSession(value: unknown): Session {
   if (!value || typeof value !== 'object') throw new Error('Invalid session.');
   const v = value as
@@ -272,7 +313,8 @@ export function validateSession(value: unknown): Session {
   if (!Number.isFinite(momentMs) || momentMs < min || momentMs > max)
     throw new Error('Selected moment is outside the timeline.');
   if (!['grid', 'links'].includes(v.view)) throw new Error('Invalid view.');
-  return { version: 2, vods, leaderKey, momentMs, view: v.view };
+  const clips = validateClips(v.version === 2 ? v.clips : undefined, vods);
+  return { version: 2, vods, leaderKey, momentMs, view: v.view, clips };
 }
 export function encodeSession(value: Session): string {
   const bytes = new TextEncoder().encode(JSON.stringify(validateSession(value)));
