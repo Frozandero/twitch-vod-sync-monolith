@@ -646,9 +646,8 @@ code {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* Shrinks with an ellipsis like other statuses so header controls always fit. */
 button.tile-status {
-  flex: none;
-  max-width: none;
   height: 24px;
   padding: 0 6px;
   border-radius: 4px;

@@ -80,7 +80,7 @@ Sessions are validated before export/import:
 - Imports have size and 100-item resource guards. Shared fragments are base64url UTF-8 JSON capped at 60,000 characters; larger sessions use JSON export.
 - Constructing a new allowlisted session strips unknown keys, including credentials.
 
-Local storage holds the recording session, up to six recent sessions (each revalidated on read; a session that grew replaces its smaller earlier states), and the optional public Client ID. Session storage holds OAuth state/token. Storage failures preserve in-memory use; sign-in requires writable session storage. OAuth checks one-time state and validates the token on launch and every 55 minutes. No account secret is embedded.
+Local storage holds the recording session, up to six recent sessions (each revalidated on read; a session that grew replaces its smaller earlier states, a smaller session never removes a larger one, and closing recordings does not add entries), and the optional public Client ID. Session storage holds OAuth state/token. Storage failures preserve in-memory use; sign-in requires writable session storage. OAuth checks one-time state and validates the token on launch and every 55 minutes. No account secret is embedded.
 
 ## Interface constraints
 

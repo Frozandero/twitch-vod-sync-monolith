@@ -25,7 +25,9 @@ export type BarStatus = {
   text: ReactNode;
   title?: string;
   actions?: StatusAction[];
-  live?: boolean;
+  // What a screen reader should hear when this status appears. The sync summary
+  // leaves it empty because its drift values change every half second.
+  announce?: string;
 };
 
 export function PlaybackBar({
@@ -137,12 +139,11 @@ export function PlaybackBar({
           />
         </div>
         <span className="bar-divider" />
-        <div
-          className={`status-slot ${status.tone ?? 'muted'}`}
-          role={status.live === false ? undefined : 'status'}
-          aria-live={status.live === false ? 'off' : 'polite'}
-          title={status.title}
-        >
+        {/* A stable live region: only the announcement text changes. */}
+        <span className="sr-only" role="status">
+          {status.announce}
+        </span>
+        <div className={`status-slot ${status.tone ?? 'muted'}`} title={status.title}>
           {status.icon === 'spin' && <LoaderCircle className="spin" size={14} aria-hidden="true" />}
           {status.icon === 'check' && <Check size={14} aria-hidden="true" />}
           {status.icon === 'alert' && <TriangleAlert size={14} aria-hidden="true" />}

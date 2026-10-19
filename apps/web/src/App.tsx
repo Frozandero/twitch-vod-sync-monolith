@@ -772,6 +772,7 @@ export default function App() {
         icon: 'alert',
         text: notice,
         title: notice,
+        announce: notice,
         actions: [dismiss(() => setNotice(''))],
       };
     if (bufferProgress && bufferProgress.total > 0) {
@@ -780,6 +781,7 @@ export default function App() {
       return {
         icon: 'spin',
         title: waiting ? `Waiting on ${waiting}` : undefined,
+        announce: slow ? 'Still lining up' : 'Lining up',
         text: (
           <>
             <b>{slow ? 'Still lining up' : 'Lining up'}</b>{' '}
@@ -807,6 +809,7 @@ export default function App() {
       return {
         icon: 'spin',
         title: startingProgress.waiting.map((vod) => vod.channel).join(', '),
+        announce: 'Starting',
         text: (
           <>
             <b>Starting</b>{' '}
@@ -822,17 +825,21 @@ export default function App() {
       return {
         tone: 'ink',
         text: `Closed ${removed.vod.channel}`,
+        announce: `Closed ${removed.vod.channel}`,
         actions: [
           { label: 'Undo (⌘Z)', icon: <Undo2 size={15} />, onClick: undoRemove },
           dismiss(() => setRemoved((r) => (r ? { ...r, shownAt: 0 } : r))),
         ],
       };
-    if (flash) return { tone: 'success', icon: 'check', text: flash };
-    if (!coverable) return { text: 'No recording covers this moment' };
+    if (flash) return { tone: 'success', icon: 'check', text: flash, announce: flash };
+    if (!coverable)
+      return {
+        text: 'No recording covers this moment',
+        announce: 'No recording covers this moment',
+      };
     const summary = syncSummary(vods, moment, playbackStates, leaderKey);
     return {
-      // Drift values change every half second; don't announce each one.
-      live: false,
+      // Drift values change every half second; the summary isn't announced.
       text: (
         <>
           {summary.inSync > 0 && (

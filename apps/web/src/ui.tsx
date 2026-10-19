@@ -139,7 +139,7 @@ export function Popover({
       if (event.key !== 'Escape') return;
       event.preventDefault();
       close.current();
-      trigger?.focus();
+      trigger?.focus({ preventScroll: true });
     };
     const pointer = (event: PointerEvent) => {
       const target = event.target as Node;
@@ -153,7 +153,7 @@ export function Popover({
       document.removeEventListener('pointerdown', pointer, true);
       // Closing from inside the panel removes the focused control; return focus to the trigger.
       const active = document.activeElement;
-      if (!active || active === document.body) trigger?.focus();
+      if (!active || active === document.body) trigger?.focus({ preventScroll: true });
     };
   }, [open, anchor, autoFocus]);
   if (!open) return null;
@@ -269,7 +269,7 @@ export function claimsKey(target: EventTarget | null, key: string) {
   if (!node || node === document.body) return false;
   if (
     node.closest(
-      'input:not([type="range"]), textarea, select, [contenteditable="true"], .popover, dialog',
+      'input:not([type="range"]), textarea, select, [contenteditable="true"], .popover, dialog, [aria-modal="true"]',
     )
   )
     return true;

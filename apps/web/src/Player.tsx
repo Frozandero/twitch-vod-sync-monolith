@@ -191,6 +191,10 @@ export function Player({
     [muted, setMuted] = useState(true),
     [current, setCurrent] = useState(0),
     [attempt, setAttempt] = useState(0);
+  // A resolved error closes its details so the next one never opens unprompted.
+  useEffect(() => {
+    if (!error) setErrorOpen(false);
+  }, [error]);
   const key = vodKey(vod),
     demo = vod.provenance === 'demo';
   const external = !supportsPlayback(vod);
@@ -792,6 +796,10 @@ export function Player({
           </span>
         )}
         <span className="tile-spacer" />
+        {/* Announce player problems once; the visible label stays short. */}
+        <span className="sr-only" role="status">
+          {error && `${vod.channel}: ${error}`}
+        </span>
         {status?.detail ? (
           <button
             ref={errorButton}

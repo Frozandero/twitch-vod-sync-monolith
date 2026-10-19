@@ -29,7 +29,8 @@ export function readRecent(raw = readStorage(KEY)): RecentSession[] {
   }
 }
 
-// Larger or smaller states of the same session replace each other instead of piling up.
+// A session that grew replaces its earlier, smaller states. Larger sessions are never
+// dropped for a smaller one: opening one of their recordings alone starts a new entry.
 export function rememberSession(
   recent: RecentSession[],
   session: Session,
@@ -38,9 +39,7 @@ export function rememberSession(
   const current = keys(session);
   const rest = recent.filter(({ session: other }) => {
     const previous = keys(other);
-    const subset = [...previous].every((key) => current.has(key));
-    const superset = [...current].every((key) => previous.has(key));
-    return !subset && !superset;
+    return ![...previous].every((key) => current.has(key));
   });
   return [{ savedAt: now, session }, ...rest].slice(0, LIMIT);
 }
