@@ -151,6 +151,9 @@ export function Popover({
     return () => {
       document.removeEventListener('keydown', key, true);
       document.removeEventListener('pointerdown', pointer, true);
+      // Closing from inside the panel removes the focused control; return focus to the trigger.
+      const active = document.activeElement;
+      if (!active || active === document.body) trigger?.focus();
     };
   }, [open, anchor, autoFocus]);
   if (!open) return null;
@@ -161,6 +164,12 @@ export function Popover({
       role={role}
       aria-label={label}
       style={position ? { top: position.top, left: position.left } : { visibility: 'hidden' }}
+      onBlur={(event) => {
+        // Tabbing away closes it; clicks inside or on the trigger don't.
+        const next = event.relatedTarget as Node | null;
+        if (!next || panel.current?.contains(next) || anchor.current?.contains(next)) return;
+        close.current();
+      }}
     >
       {children}
     </div>,
@@ -238,6 +247,8 @@ export function Menu({
               className={`menu-item ${item.danger ? 'danger' : ''}`}
               disabled={item.disabled}
               onClick={() => {
+                // Focus the trigger first so dialogs opened by the item restore to it.
+                anchor.current?.focus();
                 onClose();
                 item.onSelect();
               }}
@@ -264,6 +275,8 @@ export function claimsKey(target: EventTarget | null, key: string) {
     return true;
   if ((key === ' ' || key === 'Enter') && node.closest('button, a[href], summary, input'))
     return true;
+  // A focused native player (Kick) uses Space and arrows for its own controls.
+  if ((key === ' ' || /^Arrow/.test(key)) && node.closest('video, audio')) return true;
   if (/^(Arrow|Home|End)/.test(key) && node.closest('input, .reorder-handle, .segmented'))
     return true;
   return false;

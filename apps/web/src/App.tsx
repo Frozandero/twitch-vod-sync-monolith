@@ -9,6 +9,7 @@ import {
   Plus,
   RefreshCw,
   RotateCw,
+  Share2,
   Undo2,
   X,
 } from 'lucide-react';
@@ -269,8 +270,15 @@ export default function App() {
       /* A transient session cannot be remembered yet. */
     }
   }
+  // Remember additions and source changes; closing recordings alone isn't a new session.
+  const rememberedKeys = useRef(new Set<string>());
   useEffect(() => {
-    if (vods.length) remember();
+    const current = new Set(vods.map(vodKey));
+    const shrank =
+      current.size < rememberedKeys.current.size &&
+      [...current].every((key) => rememberedKeys.current.has(key));
+    rememberedKeys.current = current;
+    if (vods.length && !shrank) remember();
   }, [vods.map(vodKey).join('|'), leaderKey]);
   useEffect(() => {
     const save = () => remember();
@@ -308,11 +316,15 @@ export default function App() {
     const away = (event: PointerEvent) => {
       if (!addForm.current?.contains(event.target as Node)) setResultsOpen(false);
     };
+    // Clicking into a player iframe blurs the window rather than reaching the document.
+    const blur = () => setResultsOpen(false);
     document.addEventListener('pointerdown', away, true);
+    addEventListener('blur', blur);
     const settled = !busy && results.length && results.every((r) => r.status !== 'failed');
     const timer = settled ? setTimeout(() => setResultsOpen(false), 6000) : undefined;
     return () => {
       document.removeEventListener('pointerdown', away, true);
+      removeEventListener('blur', blur);
       clearTimeout(timer);
     };
   }, [resultsOpen, busy, results]);
@@ -438,6 +450,8 @@ export default function App() {
     if (!vods.length) return;
     const { min, max } = timelineBounds(vods);
     const target = Math.max(min, Math.min(max, time));
+    // A new seek supersedes old guidance, so line-up progress and Cancel stay visible.
+    setNotice('');
     syncTo(target, playIntent(), leaderAt(target));
   }
   function skip(seconds: number) {
@@ -528,7 +542,7 @@ export default function App() {
     setClips((current) => current.filter((clip) => clip.vodKey !== key));
     if (audioKey === key) setAudioKey('');
     if (!next.length) {
-      clearWorkspace();
+      clearWorkspace(false);
       setRemoved(removal);
       return;
     }
@@ -576,9 +590,9 @@ export default function App() {
     }
     setOrderAnnouncement(`${vod.channel} moved to position ${to + 1} of ${next.length}.`);
   }
-  function clearWorkspace() {
+  function clearWorkspace(keepInRecent = true) {
     if (busy) return;
-    remember();
+    if (keepInRecent) remember();
     setVods([]);
     setClips([]);
     setRemoved(undefined);
@@ -669,6 +683,9 @@ export default function App() {
     if (!narrow) writeStorage(TIMELINE_KEY, String(!open));
   }
   function resync() {
+    // Like the header Sync button, wait for a line-up or start to finish first.
+    const phase = commandRef.current?.phase;
+    if (phase === 'preparing' || phase === 'starting') return;
     const source = vods.find((vod) => vodKey(vod) === leaderKey);
     if (source) syncFrom(source);
   }
@@ -677,13 +694,17 @@ export default function App() {
   const shortcuts = useRef<(event: KeyboardEvent) => void>(() => {});
   shortcuts.current = (event) => {
     if (event.defaultPrevented || event.altKey) return;
+    // An open dialog owns Escape and every other key.
+    if (document.querySelector('dialog[open]')) return;
     if (event.key === 'Escape') {
-      if (watchMode) setWatchMode(false);
       if (resultsOpen) setResultsOpen(false);
+      else if (narrow && expanded) setTimeline(false);
+      else if (watchMode) setWatchMode(false);
       return;
     }
-    if (claimsKey(event.target, event.key)) return;
     const mod = event.metaKey || event.ctrlKey;
+    const emptyStart = event.target === startField.current && !input;
+    if (claimsKey(event.target, event.key) && !(mod && emptyStart)) return;
     if (mod) {
       if (event.key.toLowerCase() === 'z' && removed && !event.shiftKey) {
         event.preventDefault();
@@ -693,6 +714,7 @@ export default function App() {
     }
     const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
     if (key === '/') {
+      if (watchMode) return;
       event.preventDefault();
       (vods.length ? addField : startField).current?.focus();
       return;
@@ -732,7 +754,11 @@ export default function App() {
     (vod) => supportsPlayback(vod) && matchMoment(vod, moment).state === 'playing',
   );
   const source = vods.find((vod) => vodKey(vod) === leaderKey);
-  const soloed = vods.find((vod) => vodKey(vod) === audioKey);
+  // A soloed recording that doesn't cover the moment hands audio back to the source.
+  const soloed = vods.find(
+    (vod) => vodKey(vod) === audioKey && matchMoment(vod, moment).state === 'playing',
+  );
+  const audibleKey = soloed ? audioKey : '';
   const bounds = vods.length ? timelineBounds(vods) : undefined;
   const overlap = overlapRange(vods);
   const range = vods.length
@@ -805,6 +831,8 @@ export default function App() {
     if (!coverable) return { text: 'No recording covers this moment' };
     const summary = syncSummary(vods, moment, playbackStates, leaderKey);
     return {
+      // Drift values change every half second; don't announce each one.
+      live: false,
       text: (
         <>
           {summary.inSync > 0 && (
@@ -833,7 +861,7 @@ export default function App() {
                 onClick: resync,
               },
             ]
-          : soloed
+          : audioKey
             ? [
                 {
                   label: 'Follow the source audio',
@@ -940,9 +968,13 @@ export default function App() {
                           <button
                             className="text-btn"
                             onClick={() => {
-                              setInput(row.input);
+                              // Failed inputs are already back in the field; select this one.
+                              const field = addField.current;
                               setResultsOpen(false);
-                              addField.current?.focus();
+                              if (!field) return;
+                              field.focus();
+                              const at = field.value.indexOf(row.input);
+                              if (at >= 0) field.setSelectionRange(at, at + row.input.length);
                             }}
                           >
                             Edit
@@ -959,8 +991,14 @@ export default function App() {
         <div className="topbar-actions">
           {vods.length ? (
             <>
-              <button className="ghost-btn" onClick={share} title="Copy a link to this session">
-                Share link
+              <button
+                className="ghost-btn share-btn"
+                onClick={share}
+                aria-label="Share link"
+                title="Copy a link to this session"
+              >
+                <Share2 size={15} aria-hidden="true" />
+                <span>Share link</span>
               </button>
               <button
                 className="inverse-btn"
@@ -1018,7 +1056,7 @@ export default function App() {
               'separator',
               {
                 label: 'Clear workspace',
-                onSelect: clearWorkspace,
+                onSelect: () => clearWorkspace(),
                 disabled: busy || !vods.length,
                 danger: true,
               },
@@ -1048,7 +1086,7 @@ export default function App() {
       {demo && (
         <div className="demo-banner">
           <span>Demo · simulated players and sample timing</span>
-          <button className="text-btn" onClick={clearWorkspace}>
+          <button className="text-btn" onClick={() => clearWorkspace()}>
             Close demo
           </button>
         </div>
@@ -1066,6 +1104,13 @@ export default function App() {
             notice={notice}
             recent={recent}
             onOpen={loadSession}
+            onForget={(savedAt) => {
+              const next = recent.filter((entry) => entry.savedAt !== savedAt);
+              writeRecent(next);
+              setRecent(next);
+            }}
+            closed={removed?.vod.channel}
+            onUndo={undoRemove}
           />
         ) : (
           <div
@@ -1092,12 +1137,21 @@ export default function App() {
                   onDuration={updateDuration}
                   drift={driftSeconds(vod, moment, playbackStates[vodKey(vod)])}
                   sourceName={source?.channel ?? 'the source'}
-                  audioKey={audioKey}
+                  audioKey={audibleKey}
+                  soloed={audioKey === vodKey(vod)}
+                  busy={busy}
+                  localTime={localTime}
                   onSolo={() => {
                     setAudioKey(vodKey(vod));
                     showFlash(`Listening to ${vod.channel} only`);
                   }}
-                  onSeekTo={(offset) => syncTo(momentAt(vod, offset), false, vodKey(vod))}
+                  onSeekTo={(offset, correction) => {
+                    // A just-flushed offset hasn't reached state yet; seek with it anyway.
+                    const timed =
+                      correction === undefined ? vod : { ...vod, correctionSeconds: correction };
+                    setNotice('');
+                    syncTo(momentAt(timed, offset), false, vodKey(vod));
+                  }}
                   onJump={seekShared}
                   onCorrect={(seconds) => {
                     const next = vods.map((v) =>
@@ -1106,6 +1160,7 @@ export default function App() {
                     const nextBounds = timelineBounds(next);
                     const resume = playIntent();
                     setVods(next);
+                    setNotice('');
                     syncTo(Math.max(nextBounds.min, Math.min(nextBounds.max, moment)), resume);
                   }}
                   onCopy={(url) => void copy(url, `${vod.channel} timestamp link copied`)}
@@ -1168,6 +1223,7 @@ export default function App() {
           onExpanded={setTimeline}
           watchMode={watchMode}
           onExitWatch={() => setWatchMode(false)}
+          sheet={narrow}
           status={barStatus()}
           leaderKey={leaderKey}
           playbackStates={playbackStates}

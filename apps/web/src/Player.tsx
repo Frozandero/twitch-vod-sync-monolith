@@ -9,11 +9,29 @@ import {
   Volume2,
   VolumeX,
 } from 'lucide-react';
-import { formatTime, matchMoment, startMs, timestampUrl, vodKey, type Vod } from '@vodsync/core';
+import {
+  formatTime,
+  matchDescription,
+  matchMoment,
+  startMs,
+  timestampUrl,
+  vodKey,
+  type Vod,
+} from '@vodsync/core';
 import { DRIFT_LIMIT } from './syncSummary';
-import { formatDelta } from './timeFormat';
+import { clock as wallClock, formatDelta } from './timeFormat';
 import { TimingPanel } from './TimingPanel';
-import { Menu, PlatformMark } from './ui';
+import { Menu, PlatformMark, Popover } from './ui';
+
+// Player messages can be long; the header shows a short label that opens the full text.
+function shortError(message: string) {
+  if (/started muted/i.test(message)) return 'started muted';
+  if (/retrying muted/i.test(message)) return 'retrying muted';
+  if (/blocked/i.test(message)) return 'playback blocked';
+  if (/too long|timed out/i.test(message)) return 'slow to load';
+  if (/not ready to seek/i.test(message)) return 'not ready';
+  return 'player problem';
+}
 import { createPlayerClock } from './playerClock';
 import { createVodGuard, type PlaybackSnapshot, type StopReason } from './playback';
 import { createSeekPreparation, seekPosition, type SeekState } from './seekBarrier';
@@ -103,9 +121,13 @@ type Props = {
   // Verified drift against the selected moment, sampled with the shared clock.
   drift: number | null;
   sourceName: string;
+  // The recording that currently plays sound, or '' to follow the source.
   audioKey: string;
+  soloed: boolean;
+  busy: boolean;
+  localTime: boolean;
   onSolo: () => void;
-  onSeekTo: (offsetSeconds: number) => void;
+  onSeekTo: (offsetSeconds: number, correctionSeconds?: number) => void;
   onJump: (moment: number) => void;
   onCorrect: (seconds: number) => void;
   onCopy: (url: string) => void;
@@ -137,6 +159,9 @@ export function Player({
   drift,
   sourceName,
   audioKey,
+  soloed,
+  busy,
+  localTime,
   onSolo,
   onSeekTo,
   onJump,
@@ -145,8 +170,10 @@ export function Player({
   order,
 }: Props) {
   const moreButton = useRef<HTMLButtonElement>(null);
+  const errorButton = useRef<HTMLButtonElement>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [timingOpen, setTimingOpen] = useState(false);
+  const [errorOpen, setErrorOpen] = useState(false);
   const container = useRef<HTMLDivElement>(null);
   const player = useRef<Omit<PlayerHandle, 'getSnapshot'> | null>(null);
   const clock = useRef<ReturnType<typeof createPlayerClock> | null>(null);
@@ -652,8 +679,14 @@ export function Player({
   const time = formatTime(external ? match.offsetSeconds : current);
   const link = timestampUrl(vod, linkOffset);
   const platformName = vod.platform === 'kick' ? 'Kick' : 'Twitch';
-  const status: { text: string; tone: string; spin?: boolean; title?: string } | null = error
-    ? { text: error, tone: 'signal', title: error }
+  const status: {
+    text: string;
+    tone: string;
+    spin?: boolean;
+    title?: string;
+    detail?: boolean;
+  } | null = error
+    ? { text: shortError(error), tone: /muted/i.test(error) ? 'muted' : 'signal', detail: true }
     : holding && !blockedStatus
       ? {
           text:
@@ -686,7 +719,7 @@ export function Player({
       ? blockedStatus === 'before'
         ? {
             title: `Starts in ${formatTime(match.gapSeconds)}`,
-            detail: `Live at ${new Date(startMs(vod)).toISOString().slice(11, 19)} UTC`,
+            detail: `Live at ${wallClock(startMs(vod), localTime)}${localTime ? '' : ' UTC'}`,
             action: 'Move everyone to its start',
             run: () => onJump(startMs(vod)),
           }
@@ -759,37 +792,46 @@ export function Player({
           </span>
         )}
         <span className="tile-spacer" />
-        {status && (
-          <span className={`tile-status ${status.tone}`} role="status" title={status.title}>
-            {status.spin && <LoaderCircle className="spin" size={12} aria-hidden="true" />}
+        {status?.detail ? (
+          <button
+            ref={errorButton}
+            type="button"
+            className={`tile-status ${status.tone}`}
+            aria-haspopup="dialog"
+            aria-expanded={errorOpen}
+            aria-label={`${vod.channel}: ${error}`}
+            onClick={() => setErrorOpen((open) => !open)}
+          >
             <span>{status.text}</span>
-          </span>
+          </button>
+        ) : (
+          status && (
+            <span className={`tile-status ${status.tone}`} title={status.title}>
+              {status.spin && <LoaderCircle className="spin" size={12} aria-hidden="true" />}
+              <span>{status.text}</span>
+            </span>
+          )
         )}
         <a
           className="tile-time"
           href={link}
           target="_blank"
           rel="noreferrer"
-          aria-label={`Open ${vod.channel} on ${platformName} at ${formatTime(linkOffset)}`}
-          title={`Open on ${platformName} at ${formatTime(linkOffset)}`}
+          aria-label={
+            match.state === 'playing' || external
+              ? `Open ${vod.channel} on ${platformName} at ${formatTime(linkOffset)}`
+              : `Open ${vod.channel} VOD ${match.state === 'before' ? 'start' : 'end'} on ${platformName} — ${matchDescription(match)}`
+          }
+          title={
+            match.state === 'playing' || external
+              ? `Open on ${platformName} at ${formatTime(linkOffset)}`
+              : `Open VOD ${match.state === 'before' ? 'start' : 'end'} · ${matchDescription(match)}`
+          }
         >
           <time>{time}</time>
           <ArrowUpRight size={12} aria-hidden="true" />
         </a>
         <div className="tile-actions">
-          {error && (
-            <button
-              className="icon-btn"
-              aria-label={`Retry ${vod.channel}`}
-              title="Retry"
-              onClick={() => {
-                setError('');
-                setAttempt((n) => n + 1);
-              }}
-            >
-              <RotateCw size={15} />
-            </button>
-          )}
           {!external && (
             <>
               <button
@@ -839,18 +881,40 @@ export function Player({
         onClose={() => setMenuOpen(false)}
         label={`${vod.channel} actions`}
         items={[
-          { label: 'Timing', onSelect: () => setTimingOpen(true) },
+          // Recordings resolving in an add would overwrite timing changes, so wait.
+          { label: 'Timing', onSelect: () => setTimingOpen(true), disabled: busy },
           {
             label: `Listen to ${vod.channel} only`,
             onSelect: onSolo,
-            disabled: external || !ready || audioKey === key,
+            disabled: external || !ready || soloed,
           },
           { label: 'Copy timestamp link', onSelect: () => onCopy(link) },
           { label: 'Move to position', onSelect: order.onArrange, disabled: order.disabled },
           'separator',
-          { label: `Close ${vod.channel}`, onSelect: onRemove, danger: true },
+          { label: `Close ${vod.channel}`, onSelect: onRemove, danger: true, disabled: busy },
         ]}
       />
+      <Popover
+        anchor={errorButton}
+        open={errorOpen && !!error}
+        onClose={() => setErrorOpen(false)}
+        label={`${vod.channel} problem`}
+        className="error-pop"
+      >
+        <p role="alert">{error}</p>
+        <button
+          type="button"
+          className="outline-btn"
+          onClick={() => {
+            setErrorOpen(false);
+            setError('');
+            setAttempt((n) => n + 1);
+          }}
+        >
+          <RotateCw size={13} aria-hidden="true" />
+          Reload player
+        </button>
+      </Popover>
       <TimingPanel
         anchor={moreButton}
         open={timingOpen}

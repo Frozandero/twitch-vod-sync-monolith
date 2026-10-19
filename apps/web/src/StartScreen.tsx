@@ -1,5 +1,5 @@
 import type { FormEvent, RefObject } from 'react';
-import { LoaderCircle, Plus } from 'lucide-react';
+import { LoaderCircle, Plus, Undo2, X } from 'lucide-react';
 import {
   formatTime,
   parseChannelTarget,
@@ -102,6 +102,9 @@ export function StartScreen({
   notice,
   recent,
   onOpen,
+  onForget,
+  closed,
+  onUndo,
 }: {
   field: RefObject<HTMLTextAreaElement | null>;
   input: string;
@@ -113,6 +116,10 @@ export function StartScreen({
   notice: string;
   recent: RecentSession[];
   onOpen: (session: Session) => void;
+  onForget: (savedAt: number) => void;
+  // The channel of a recording that was just closed, so it can be restored.
+  closed?: string;
+  onUndo: () => void;
 }) {
   const lines = busy ? pending : splitInputs(input);
   const failed = new Map(
@@ -121,6 +128,16 @@ export function StartScreen({
   const preview = previewInputs(lines).slice(0, 12);
   return (
     <div className="start">
+      {closed && (
+        <div className="start-undo" role="status">
+          <span>Closed {closed}</span>
+          <button type="button" className="ghost-btn" onClick={onUndo} disabled={busy}>
+            <Undo2 size={15} aria-hidden="true" />
+            Undo
+            <Kbd>⌘Z</Kbd>
+          </button>
+        </div>
+      )}
       <h1>Paste recordings to watch them on one clock</h1>
       <p className="start-lede">
         Twitch or Kick VODs, clips and timestamped links. Add <code>twitch/name</code> or{' '}
@@ -194,7 +211,12 @@ export function StartScreen({
           <ul>
             {recent.map(({ session, savedAt }) => (
               <li key={savedAt}>
-                <button type="button" onClick={() => onOpen(session)}>
+                <button
+                  type="button"
+                  className="recent-open"
+                  disabled={busy}
+                  onClick={() => onOpen(session)}
+                >
                   <span className="recent-name">{label(session)}</span>
                   <span className="mono recent-time">
                     {shortClock(session.momentMs, false)} UTC
@@ -202,6 +224,16 @@ export function StartScreen({
                   <span className="recent-date">
                     {dayLabel(session.momentMs, false).slice(4, -5)}
                   </span>
+                </button>
+                <button
+                  type="button"
+                  className="icon-btn small subtle"
+                  aria-label={`Forget ${label(session)}`}
+                  title="Remove from recent"
+                  disabled={busy}
+                  onClick={() => onForget(savedAt)}
+                >
+                  <X size={14} />
                 </button>
               </li>
             ))}

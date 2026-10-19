@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import {
   Check,
   ChevronDown,
@@ -47,6 +47,7 @@ export function PlaybackBar({
   onExpanded,
   watchMode,
   onExitWatch,
+  sheet,
   status,
   leaderKey,
   playbackStates,
@@ -71,6 +72,8 @@ export function PlaybackBar({
   onExpanded: (expanded: boolean) => void;
   watchMode: boolean;
   onExitWatch: () => void;
+  // Phones show the timeline as a modal bottom sheet.
+  sheet: boolean;
   status: BarStatus;
   leaderKey: string;
   playbackStates: Record<string, PlaybackSnapshot>;
@@ -78,6 +81,10 @@ export function PlaybackBar({
   onRemove: (vod: Vod) => void;
 }) {
   const [draft, setDraft] = useState<number | null>(null);
+  // Collapsing the timeline discards an uncommitted seek preview.
+  useEffect(() => {
+    if (!expanded) setDraft(null);
+  }, [expanded]);
   const shown = draft ?? moment;
   const localZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   return (
@@ -132,8 +139,8 @@ export function PlaybackBar({
         <span className="bar-divider" />
         <div
           className={`status-slot ${status.tone ?? 'muted'}`}
-          role="status"
-          aria-live="polite"
+          role={status.live === false ? undefined : 'status'}
+          aria-live={status.live === false ? 'off' : 'polite'}
           title={status.title}
         >
           {status.icon === 'spin' && <LoaderCircle className="spin" size={14} aria-hidden="true" />}
@@ -176,7 +183,7 @@ export function PlaybackBar({
           <button
             className="ghost-btn"
             aria-expanded={expanded}
-            aria-controls="timeline-lanes"
+            aria-controls={expanded ? 'timeline-lanes' : undefined}
             title={`${expanded ? 'Hide' : 'Show'} timeline (T)`}
             onClick={() => onExpanded(!expanded)}
           >
@@ -209,6 +216,7 @@ export function PlaybackBar({
             onSeek={onSeek}
             onRemove={onRemove}
             onClose={() => onExpanded(false)}
+            sheet={sheet}
           />
         </>
       )}

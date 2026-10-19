@@ -646,6 +646,28 @@ code {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+button.tile-status {
+  flex: none;
+  max-width: none;
+  height: 24px;
+  padding: 0 6px;
+  border-radius: 4px;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+button.tile-status:hover {
+  background: var(--surface-sunken);
+}
+.error-pop {
+  width: 280px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px;
+  font-size: 13px;
+  line-height: 20px;
+}
 .tile-status.warning {
   color: var(--warning);
   font-family: var(--mono);
@@ -835,13 +857,16 @@ code {
 .status-slot > svg {
   flex: none;
 }
+/* Notices wrap so their guidance stays readable; summary items stay on one line. */
 .status-text {
   min-width: 0;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 4px 14px;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  gap: 2px 14px;
+  line-height: 18px;
+}
+.summary-item {
   white-space: nowrap;
 }
 .status-slot b {
@@ -1152,10 +1177,12 @@ code {
 .watch-mode > .demo-banner {
   display: none;
 }
+/* If minimum player sizes don't fit, the grid scrolls here rather than under the bar. */
 .watch-mode .workspace {
   flex: 1;
   display: flex;
   min-height: 0;
+  overflow: auto;
   padding: 4px;
 }
 .watch-mode .player-grid {
@@ -1428,15 +1455,21 @@ dialog::backdrop {
   padding: 0;
   list-style: none;
 }
-.start-recent button {
+.start-recent li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid var(--line);
+}
+.recent-open {
+  flex: 1;
+  min-width: 0;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 24px;
-  width: 100%;
   height: 44px;
   text-align: left;
-  border-bottom: 1px solid var(--line);
 }
 .recent-name {
   overflow: hidden;
@@ -1444,8 +1477,22 @@ dialog::backdrop {
   white-space: nowrap;
   transition: color var(--fast);
 }
-.start-recent button:hover .recent-name {
+.recent-open:hover:not(:disabled) .recent-name {
   color: var(--accent);
+}
+.start-undo {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 32px;
+  padding: 6px 6px 6px 14px;
+  font-size: 13px;
+  background: var(--surface-raised);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.start-undo span {
+  flex: 1;
 }
 .recent-time {
   font-size: 12px;
@@ -1491,8 +1538,16 @@ dialog::backdrop {
   }
   .add-field .kbd,
   .inverse-btn span,
-  .topbar-actions .ghost-btn {
+  .share-btn span,
+  .topbar-actions .ghost-btn:not(.share-btn) {
     display: none;
+  }
+  .share-btn {
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    justify-content: center;
+    color: var(--ink);
   }
   .inverse-btn {
     width: 44px;
@@ -1534,9 +1589,14 @@ dialog::backdrop {
   .tile-status {
     max-width: 30%;
   }
+  /* The bar stays reachable while stacked players scroll beneath it. */
   .playbar {
     position: sticky;
     bottom: 0;
+  }
+  /* The open sheet and its scrim must cover the top bar too. */
+  .playbar.expanded {
+    z-index: 20;
   }
   .playbar-row {
     gap: 10px;

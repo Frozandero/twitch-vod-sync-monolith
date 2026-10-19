@@ -94,8 +94,11 @@ describe('recent sessions', () => {
     const first = rememberSession([], session([a]), 1);
     const grown = rememberSession(first, session([a, b]), 2);
     expect(grown.map((r) => r.session.vods.length)).toEqual([2]);
-    const other = rememberSession(grown, session([b]), 3);
-    expect(other.map((r) => r.savedAt)).toEqual([3, 2]);
+    const shrunk = rememberSession(grown, session([b]), 3);
+    expect(shrunk.map((r) => r.savedAt)).toEqual([3]);
+    const c = { ...b, id: '3', url: 'https://www.twitch.tv/videos/3' };
+    const other = rememberSession(grown, session([c]), 4);
+    expect(other.map((r) => r.savedAt)).toEqual([4, 2]);
   });
   it('drops entries that no longer validate', () => {
     const raw = JSON.stringify([

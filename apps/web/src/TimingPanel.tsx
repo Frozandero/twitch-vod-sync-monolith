@@ -32,7 +32,7 @@ export function TimingPanel({
   drift: number | null;
   source: boolean;
   sourceName: string;
-  onSeek: (offsetSeconds: number) => void;
+  onSeek: (offsetSeconds: number, correctionSeconds?: number) => void;
   onCorrect: (seconds: number) => void;
 }) {
   const jump = useRef<HTMLInputElement>(null);
@@ -116,8 +116,10 @@ export function TimingPanel({
                   throw new Error(
                     `${vod.channel}’s VOD is ${formatTime(vod.durationSeconds)} long.`,
                   );
+                // The flushed offset reaches state after this handler; seek with it directly.
+                const corrected = pending.current?.value;
                 flush();
-                onSeek(seconds);
+                onSeek(seconds, corrected);
                 onClose();
               } catch (problem) {
                 setError(problem instanceof Error ? problem.message : 'Check the timestamp.');
@@ -192,11 +194,12 @@ export function TimingPanel({
           </div>
           <span />
           <span
-            role="status"
             className={`timing-drift ${drift !== null && Math.abs(drift) > DRIFT_LIMIT ? 'drifted' : drift !== null ? 'aligned' : ''}`}
           >
             {error ? (
-              <span className="signal">{error}</span>
+              <span className="signal" role="alert">
+                {error}
+              </span>
             ) : source ? (
               'Source clock'
             ) : drift === null ? (
