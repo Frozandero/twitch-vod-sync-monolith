@@ -5,12 +5,22 @@ import {
   parseChannelTarget,
   parseMedia,
   vodKey,
+  type ClipMarker,
   type Vod,
 } from '@vodsync/core';
 import { resolveChannelTarget, resolveMedia, type TwitchAuth } from '@vodsync/providers';
 
 type Context = { vods: Vod[]; momentMs: number; leaderKey: string };
 type Failure = { input: string; error: string };
+export type InputResult =
+  | {
+      input: string;
+      status: 'added' | 'existing';
+      kind: 'vod' | 'clip' | 'channel';
+      vod: Vod;
+      offsetSeconds: number;
+    }
+  | { input: string; status: 'failed'; error: string };
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : 'Please retry.');
 
 // Resolve explicit media first, then streamer targets against one captured moment.
@@ -26,6 +36,8 @@ export async function resolveRecordingInputs(
   );
   const accepted = new Map<number, Vod>();
   const failures = new Map<number, Failure>();
+  const outcomes = new Map<number, InputResult>();
+  const clips: ClipMarker[] = [];
   const next = new Map(existing);
   let anchor: { vod: Vod; offsetSeconds: number; input: string } | undefined;
   const indexed = inputs.map((input, index) => ({
@@ -35,11 +47,19 @@ export async function resolveRecordingInputs(
   }));
   let momentMs = context.momentMs;
   let leaderKey = context.leaderKey;
-  function accept(index: number, vod: Vod) {
+  function accept(
+    index: number,
+    vod: Vod,
+    input: string,
+    kind: 'vod' | 'clip' | 'channel',
+    offsetSeconds: number,
+  ) {
     if (!next.has(vodKey(vod)) && next.size >= MAX_VODS)
       throw new Error('This session is too large.');
+    const status = next.has(vodKey(vod)) ? 'existing' : 'added';
     next.set(vodKey(vod), vod);
     accepted.set(index, vod);
+    outcomes.set(index, { input, status, kind, vod, offsetSeconds });
   }
   function preserve(vod: Vod) {
     const known = existing.get(vodKey(vod));
@@ -63,7 +83,16 @@ export async function resolveRecordingInputs(
         if (result.status === 'rejected') throw result.reason;
         const vod = preserve(result.value.vod);
         momentAt(vod, result.value.offsetSeconds);
-        accept(index, vod);
+        const ref = parseMedia(input);
+        accept(index, vod, input, ref.kind, result.value.offsetSeconds);
+        if (ref.kind === 'clip')
+          clips.push({
+            platform: ref.platform,
+            id: ref.id,
+            url: ref.url,
+            vodKey: vodKey(vod),
+            offsetSeconds: result.value.offsetSeconds,
+          });
         anchor ??= { vod, offsetSeconds: result.value.offsetSeconds, input };
       } catch (error) {
         failures.set(index, { input, error: messageOf(error) });
@@ -94,11 +123,12 @@ export async function resolveRecordingInputs(
       try {
         if (result.status === 'rejected') throw result.reason;
         const vod = preserve(result.value.vod);
-        if (matchMoment(vod, momentMs).state !== 'playing')
+        const match = matchMoment(vod, momentMs);
+        if (match.state !== 'playing')
           throw new Error(
             'This recording does not cover the selected moment with its saved timing and duration.',
           );
-        accept(index, vod);
+        accept(index, vod, input, 'channel', match.offsetSeconds);
       } catch (error) {
         failures.set(index, { input, error: messageOf(error) });
       }
@@ -107,11 +137,15 @@ export async function resolveRecordingInputs(
   // Keep prior order; new media retain paste order, even when a target precedes the source.
   const ordered = new Map(existing);
   for (const [, vod] of [...accepted].sort(([a], [b]) => a - b)) ordered.set(vodKey(vod), vod);
+  for (const [index, failure] of failures)
+    outcomes.set(index, { input: failure.input, status: 'failed', error: failure.error });
   return {
     vods: [...ordered.values()],
     momentMs,
     leaderKey,
     added: accepted.size,
+    clips,
+    results: [...outcomes].sort(([a], [b]) => a - b).map(([, outcome]) => outcome),
     failures: [...failures].sort(([a], [b]) => a - b).map(([, failure]) => failure),
   };
 }

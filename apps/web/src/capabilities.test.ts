@@ -75,6 +75,7 @@ describe('mixed provider sessions', () => {
       leaderKey: vodKey(kick),
       momentMs: moment,
       view: 'grid' as const,
+      clips: [],
     };
     const restored = decodeSession(encodeSession(session));
     expect(restored.vods.map(vodKey)).toEqual([vodKey(kick), vodKey(twitch)]);

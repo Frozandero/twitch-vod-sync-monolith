@@ -132,3 +132,25 @@ it('does not label a saved corrected or shortened boundary as matching', async (
   expect(result.vods).toEqual([source, known]);
   expect(result.failures[0].error).toContain('saved timing and duration');
 });
+it('reports one outcome per input and records clip markers in the parent VOD', async () => {
+  const resolvers = providers();
+  resolvers.media.mockResolvedValue({ vod: target, offsetSeconds: 900 });
+  resolvers.channel.mockRejectedValueOnce(new Error('No matching VOD'));
+  const result = await resolveRecordingInputs(
+    ['https://clips.twitch.tv/Example', 'twitch.tv/videos/123', 'kick/missing'],
+    context,
+    undefined,
+    resolvers,
+  );
+  expect(result.results.map((item) => item.status)).toEqual(['added', 'existing', 'failed']);
+  expect(result.results[0]).toMatchObject({ kind: 'clip', offsetSeconds: 900 });
+  expect(result.clips).toEqual([
+    {
+      platform: 'twitch',
+      id: 'Example',
+      url: 'https://clips.twitch.tv/Example',
+      vodKey: vodKey(target),
+      offsetSeconds: 900,
+    },
+  ]);
+});

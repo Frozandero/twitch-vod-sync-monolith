@@ -1,20 +1,15 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import {
   ArrowLeft,
   ArrowRight,
   Check,
-  Download,
-  ExternalLink,
-  FileUp,
-  Info,
   LoaderCircle,
   Maximize2,
-  Minimize2,
   MoreHorizontal,
   Plus,
-  Settings2,
+  RefreshCw,
+  RotateCw,
   Share2,
-  Trash2,
   Undo2,
   X,
 } from 'lucide-react';
@@ -25,16 +20,16 @@ import {
   formatTime,
   matchMoment,
   momentAt,
-  parseTime,
   startMs,
   timelineBounds,
   validateSession,
   vodKey,
+  type ClipMarker,
   type Session,
   type Vod,
 } from '@vodsync/core';
 import type { TwitchAuth } from '@vodsync/providers';
-import { resolveRecordingInputs } from './recordingInputs';
+import { resolveRecordingInputs, type InputResult } from './recordingInputs';
 import {
   beginLogin,
   configuredClientId,
@@ -44,16 +39,25 @@ import {
   validateAuth,
 } from './auth';
 import { Player, type PlayerHandle, type SyncCommand } from './Player';
-import { Timeline, TimelineToggle } from './Timeline';
+import { PlaybackBar, type BarStatus } from './PlaybackBar';
 import type { PlaybackSnapshot, StopReason } from './playback';
 import { seekBarrier } from './seekBarrier';
 import { anyPlaying, startDecision, startProgress } from './playbackStart';
 import { readStorage, writeStorage } from './storage';
 import { supportsPlayback } from './capabilities';
 import { useGridLayout } from './useGridLayout';
+import { driftSeconds, syncSummary } from './syncSummary';
+import { overlapRange, viewRange } from './timelineScale';
+import { clock, formatDelta, formatSpan } from './timeFormat';
+import { readRecent, rememberSession, writeRecent, type RecentSession } from './recentSessions';
+import { StartScreen, splitInputs } from './StartScreen';
+import { BrandMark, Kbd, Menu, PlatformMark, claimsKey } from './ui';
 
 const SESSION_KEY = 'vodsync.session.v1'; // Preserve and migrate existing workspaces.
+const TIMELINE_KEY = 'vodsync.timelineCollapsed';
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : 'Please retry.');
+const narrowQuery = '(max-width: 700px)';
+const isNarrow = () => typeof matchMedia === 'function' && matchMedia(narrowQuery).matches;
 function gridSession(session: Session): Session {
   return { ...session, view: 'grid' };
 }
@@ -67,6 +71,11 @@ function initialState(): { session?: Session; error?: string } {
     return { error: messageOf(error) };
   }
 }
+const shortInput = (input: string) => input.replace(/^https?:\/\/(www\.|m\.)?/i, '');
+function mergeClips(current: ClipMarker[], added: ClipMarker[]) {
+  const known = new Set(current.map((clip) => `${clip.platform}:${clip.id}`));
+  return [...current, ...added.filter((clip) => !known.has(`${clip.platform}:${clip.id}`))];
+}
 function Modal({
   title,
   close,
@@ -74,7 +83,7 @@ function Modal({
 }: {
   title: string;
   close: () => void;
-  children: React.ReactNode;
+  children: ReactNode;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
@@ -98,8 +107,8 @@ function Modal({
       <div className="modal-content">
         <div className="modal-heading">
           <h2>{title}</h2>
-          <button className="icon-button" aria-label="Close dialog" onClick={close}>
-            <X size={19} />
+          <button className="icon-btn" aria-label="Close dialog" onClick={close}>
+            <X size={17} />
           </button>
         </div>
         {children}
@@ -111,32 +120,50 @@ function Modal({
 export default function App() {
   const [initial] = useState(initialState);
   const [vods, setVods] = useState<Vod[]>(initial.session?.vods || []);
+  const [clips, setClips] = useState<ClipMarker[]>(initial.session?.clips || []);
   const [leaderKey, setLeaderKey] = useState(initial.session?.leaderKey || '');
   const [moment, setMoment] = useState(initial.session?.momentMs || 0);
   const momentRef = useRef(moment);
   momentRef.current = moment;
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
-  const [failures, setFailures] = useState<{ input: string; error: string }[]>([]);
+  const [pending, setPending] = useState<string[]>([]);
+  const [results, setResults] = useState<InputResult[]>([]);
+  const [resultsOpen, setResultsOpen] = useState(false);
   const [notice, setNotice] = useState(initial.error || '');
+  const [flash, setFlash] = useState('');
   const [modal, setModal] = useState<'settings' | 'help' | null>(null);
-  const [editing, setEditing] = useState<Vod>();
   const [arranging, setArranging] = useState(false);
   const [draggingKey, setDraggingKey] = useState('');
   const [dropKey, setDropKey] = useState('');
   const [orderAnnouncement, setOrderAnnouncement] = useState('');
-  const [removed, setRemoved] = useState<{ vod: Vod; index: number; moment: number }>();
+  const [removed, setRemoved] = useState<{
+    vod: Vod;
+    index: number;
+    moment: number;
+    clips: ClipMarker[];
+    shownAt: number;
+  }>();
   const [watchMode, setWatchMode] = useState(false);
-  const { grid, columns, rows, tracks, positions } = useGridLayout(vods.length);
-  const [timelineCollapsed, setTimelineCollapsed] = useState(
-    () => readStorage('vodsync.timelineCollapsed') === 'true',
+  const { grid, rows, tracks, positions } = useGridLayout(vods.length);
+  const [narrow, setNarrow] = useState(isNarrow);
+  const [expanded, setExpanded] = useState(
+    () => !isNarrow() && readStorage(TIMELINE_KEY) !== 'true',
   );
+  const [localTime, setLocalTime] = useState(false);
+  const [zoom, setZoom] = useState<'all' | 'overlap'>('all');
+  const [audioKey, setAudioKey] = useState('');
+  const [recent, setRecent] = useState<RecentSession[]>(() => readRecent());
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuButton = useRef<HTMLButtonElement>(null);
+  const addField = useRef<HTMLTextAreaElement>(null);
+  const startField = useRef<HTMLTextAreaElement>(null);
+  const addForm = useRef<HTMLDivElement>(null);
   const [auth, setAuth] = useState<TwitchAuth>();
   const [clientId, setClientId] = useState(
     configuredClientId || readStorage('vodsync.clientId') || '',
   );
   const [authLoading, setAuthLoading] = useState(true);
-  const [copied, setCopied] = useState('');
   const [playing, setPlaying] = useState(false);
   const [playbackStates, setPlaybackStates] = useState<Record<string, PlaybackSnapshot>>({});
   const leaderRef = useRef(leaderKey);
@@ -173,7 +200,7 @@ export default function App() {
   }
   const handles = useRef(new Map<string, PlayerHandle>());
   const importInput = useRef<HTMLInputElement>(null);
-  const copyTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const flashTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const serial = useRef(0);
   const demo = vods.some((v) => v.provenance === 'demo');
   const register = useCallback((key: string, handle: PlayerHandle | null) => {
@@ -197,7 +224,9 @@ export default function App() {
     );
   }, []);
   const session = (): Session =>
-    validateSession({ version: 2, vods, leaderKey, momentMs: moment, view: 'grid' });
+    validateSession({ version: 2, vods, leaderKey, momentMs: moment, view: 'grid', clips });
+  const sessionRef = useRef(session);
+  sessionRef.current = session;
 
   useEffect(() => {
     restoreAuth()
@@ -229,8 +258,34 @@ export default function App() {
     } catch {
       /* Transient state while changing recordings. */
     }
-  }, [vods, leaderKey, moment]);
-  useEffect(() => () => clearTimeout(copyTimer.current), []);
+  }, [vods, leaderKey, moment, clips]);
+  // Keep a short local history of sessions; the newest state replaces older ones.
+  function remember() {
+    try {
+      if (!vods.length) return;
+      const next = rememberSession(readRecent(), sessionRef.current());
+      writeRecent(next);
+      setRecent(next);
+    } catch {
+      /* A transient session cannot be remembered yet. */
+    }
+  }
+  // Remember additions and source changes; closing recordings alone isn't a new session.
+  const rememberedKeys = useRef(new Set<string>());
+  useEffect(() => {
+    const current = new Set(vods.map(vodKey));
+    const shrank =
+      current.size < rememberedKeys.current.size &&
+      [...current].every((key) => rememberedKeys.current.has(key));
+    rememberedKeys.current = current;
+    if (vods.length && !shrank) remember();
+  }, [vods.map(vodKey).join('|'), leaderKey]);
+  useEffect(() => {
+    const save = () => remember();
+    addEventListener('pagehide', save);
+    return () => removeEventListener('pagehide', save);
+  });
+  useEffect(() => () => clearTimeout(flashTimer.current), []);
   useEffect(() => {
     if (!vods.length) return;
     const bounds = timelineBounds(vods);
@@ -240,12 +295,39 @@ export default function App() {
     if (clamped !== momentRef.current) syncTo(clamped, false);
   }, [vods]);
   useEffect(() => {
-    const escape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setWatchMode(false);
+    if (typeof matchMedia !== 'function') return;
+    const query = matchMedia(narrowQuery);
+    const change = () => {
+      setNarrow(query.matches);
+      if (query.matches) setExpanded(false);
     };
-    window.addEventListener('keydown', escape);
-    return () => window.removeEventListener('keydown', escape);
+    query.addEventListener('change', change);
+    return () => query.removeEventListener('change', change);
   }, []);
+  // Hide the undo prompt after a while; ⌘Z keeps working until the next close.
+  useEffect(() => {
+    if (!removed) return;
+    const timer = setTimeout(() => setRemoved((r) => (r ? { ...r, shownAt: 0 } : r)), 12000);
+    return () => clearTimeout(timer);
+  }, [removed?.vod]);
+  // Close the add results when the user moves on; keep failures until dismissed.
+  useEffect(() => {
+    if (!resultsOpen) return;
+    const away = (event: PointerEvent) => {
+      if (!addForm.current?.contains(event.target as Node)) setResultsOpen(false);
+    };
+    // Clicking into a player iframe blurs the window rather than reaching the document.
+    const blur = () => setResultsOpen(false);
+    document.addEventListener('pointerdown', away, true);
+    addEventListener('blur', blur);
+    const settled = !busy && results.length && results.every((r) => r.status !== 'failed');
+    const timer = settled ? setTimeout(() => setResultsOpen(false), 6000) : undefined;
+    return () => {
+      document.removeEventListener('pointerdown', away, true);
+      removeEventListener('blur', blur);
+      clearTimeout(timer);
+    };
+  }, [resultsOpen, busy, results]);
   // Follow the last synced player's clock without repeatedly seeking the others.
   useEffect(() => {
     if (!vods.length) return;
@@ -292,7 +374,7 @@ export default function App() {
         } else if (decision === 'failed') {
           cancelSeek();
           setNotice(
-            `Couldn’t start ${progress.waiting.map((vod) => vod.channel).join(', ')}. All players are paused. Press play inside the affected player, then Sync from it.`,
+            `${progress.waiting.map((vod) => vod.channel).join(', ')} didn’t start. Everyone is paused. Press play inside that player, then sync from it.`,
           );
         }
         return;
@@ -348,30 +430,60 @@ export default function App() {
     }
     setPlaying(false);
   }
+  function playIntent() {
+    const active = commandRef.current;
+    return active?.phase === 'preparing' || active?.phase === 'starting'
+      ? active.playing
+      : playersArePlaying();
+  }
+  // Keep the current source when it covers the moment; otherwise prefer a playable recording.
+  function leaderAt(time: number) {
+    const covers = (v: Vod) => matchMoment(v, time).state === 'playing';
+    const current = vods.find((v) => vodKey(v) === leaderKey);
+    const leader =
+      (current && supportsPlayback(current) && covers(current) ? current : undefined) ??
+      vods.find((v) => supportsPlayback(v) && covers(v)) ??
+      vods.find(covers);
+    return leader ? vodKey(leader) : leaderKey;
+  }
+  function seekShared(time: number) {
+    if (!vods.length) return;
+    const { min, max } = timelineBounds(vods);
+    const target = Math.max(min, Math.min(max, time));
+    // A new seek supersedes old guidance, so line-up progress and Cancel stay visible.
+    setNotice('');
+    syncTo(target, playIntent(), leaderAt(target));
+  }
+  function skip(seconds: number) {
+    seekShared(
+      (commandRef.current?.phase === 'preparing' ? commandRef.current.moment : moment) +
+        seconds * 1000,
+    );
+  }
+  function showFlash(text: string) {
+    clearTimeout(flashTimer.current);
+    setFlash(text);
+    flashTimer.current = setTimeout(() => setFlash(''), 2400);
+  }
   function loadSession(next: Session) {
     const clean = gridSession(next);
     setVods(clean.vods);
+    setClips(clean.clips);
     setRemoved(undefined);
     setDraggingKey('');
     setDropKey('');
     setPlaybackStates({});
-    setFailures([]);
+    setResults([]);
+    setResultsOpen(false);
     setNotice('');
+    setAudioKey('');
     syncTo(clean.momentMs, false, clean.leaderKey);
   }
   async function addRecordings(event?: FormEvent) {
     event?.preventDefault();
     if (busy || authLoading) return;
     setNotice('');
-    setFailures([]);
-    const inputs = [
-      ...new Set(
-        input
-          .split(/[\s,]+/)
-          .map((s) => s.trim())
-          .filter(Boolean),
-      ),
-    ];
+    const inputs = splitInputs(input);
     if (!inputs.length) {
       setNotice('Paste a VOD, clip, twitch/name, or kick/name.');
       return;
@@ -381,6 +493,9 @@ export default function App() {
       return;
     }
     setBusy(true);
+    setPending(inputs);
+    setResults([]);
+    setResultsOpen(true);
     try {
       const result = await resolveRecordingInputs(
         inputs,
@@ -389,13 +504,16 @@ export default function App() {
       );
       if (result.added) {
         setVods(result.vods);
+        setClips((current) => mergeClips(current, result.clips));
         syncTo(result.momentMs, false, result.leaderKey);
-        setInput(result.failures.map((failure) => failure.input).join('\n'));
       }
-      setFailures(result.failures);
+      setInput(result.failures.map((failure) => failure.input).join('\n'));
+      setResults(result.results);
     } catch (error) {
       setNotice(messageOf(error));
+      setResultsOpen(false);
     }
+    setPending([]);
     setBusy(false);
   }
   function syncFrom(vod: Vod) {
@@ -403,6 +521,7 @@ export default function App() {
       const handle = handles.current.get(vodKey(vod));
       if (!handle) throw new Error('Wait for this player to load.');
       syncTo(momentAt(vod, handle.getCurrentTime()), !handle.isPaused(), vodKey(vod));
+      setAudioKey('');
       setNotice('');
     } catch (error) {
       setNotice(messageOf(error));
@@ -410,19 +529,28 @@ export default function App() {
   }
   function remove(vod: Vod) {
     if (busy) return;
-    const removal = { vod, index: vods.findIndex((v) => vodKey(v) === vodKey(vod)), moment };
-    const next = vods.filter((v) => vodKey(v) !== vodKey(vod));
+    const key = vodKey(vod);
+    const removal = {
+      vod,
+      index: vods.findIndex((v) => vodKey(v) === key),
+      moment,
+      clips: clips.filter((clip) => clip.vodKey === key),
+      shownAt: Date.now(),
+    };
+    const next = vods.filter((v) => vodKey(v) !== key);
     setVods(next);
+    setClips((current) => current.filter((clip) => clip.vodKey !== key));
+    if (audioKey === key) setAudioKey('');
     if (!next.length) {
-      clearWorkspace();
+      clearWorkspace(false);
       setRemoved(removal);
       return;
     }
     setRemoved(removal);
     const { min, max } = timelineBounds(next);
     const nextMoment = Math.max(min, Math.min(max, moment));
-    if (leaderKey === vodKey(vod) || nextMoment !== moment)
-      syncTo(nextMoment, false, leaderKey === vodKey(vod) ? vodKey(next[0]) : leaderKey);
+    if (leaderKey === key || nextMoment !== moment)
+      syncTo(nextMoment, false, leaderKey === key ? vodKey(next[0]) : leaderKey);
   }
   function undoRemove() {
     if (!removed || busy) return;
@@ -437,6 +565,7 @@ export default function App() {
     const next = [...vods];
     next.splice(Math.min(removed.index, next.length), 0, removed.vod);
     setVods(next);
+    setClips((current) => mergeClips(current, removed.clips));
     if (!vods.length) syncTo(removed.moment, false, vodKey(removed.vod));
     setRemoved(undefined);
   }
@@ -461,9 +590,11 @@ export default function App() {
     }
     setOrderAnnouncement(`${vod.channel} moved to position ${to + 1} of ${next.length}.`);
   }
-  function clearWorkspace() {
+  function clearWorkspace(keepInRecent = true) {
     if (busy) return;
+    if (keepInRecent) remember();
     setVods([]);
+    setClips([]);
     setRemoved(undefined);
     setArranging(false);
     setDraggingKey('');
@@ -472,17 +603,17 @@ export default function App() {
     updateCommand(null);
     setLeaderKey('');
     setMoment(0);
-    setFailures([]);
+    setResults([]);
+    setResultsOpen(false);
     setPlaying(false);
     setWatchMode(false);
+    setAudioKey('');
     history.replaceState(null, '', location.pathname);
   }
-  async function copy(text: string, label: string) {
+  async function copy(text: string, done: string) {
     try {
       await navigator.clipboard.writeText(text);
-      clearTimeout(copyTimer.current);
-      setCopied(label);
-      copyTimer.current = setTimeout(() => setCopied(''), 2200);
+      showFlash(done);
     } catch {
       setNotice('Clipboard access was blocked. Open the link to copy it, or export the session.');
     }
@@ -492,7 +623,7 @@ export default function App() {
       const url = new URL(location.href);
       url.search = '';
       url.hash = `session=${encodeSession(session())}`;
-      void copy(url.toString(), 'session');
+      void copy(url.toString(), `Session link copied · ${vods.length} recordings`);
     } catch (error) {
       setNotice(messageOf(error));
     }
@@ -547,6 +678,68 @@ export default function App() {
     setNotice('');
     syncTo(moment, true, vodKey(leader));
   }
+  function setTimeline(open: boolean) {
+    setExpanded(open);
+    if (!narrow) writeStorage(TIMELINE_KEY, String(!open));
+  }
+  function resync() {
+    // Like the header Sync button, wait for a line-up or start to finish first.
+    const phase = commandRef.current?.phase;
+    if (phase === 'preparing' || phase === 'starting') return;
+    const source = vods.find((vod) => vodKey(vod) === leaderKey);
+    if (source) syncFrom(source);
+  }
+
+  // Shortcuts never take keys from fields, menus or focused controls that use them.
+  const shortcuts = useRef<(event: KeyboardEvent) => void>(() => {});
+  shortcuts.current = (event) => {
+    if (event.defaultPrevented || event.altKey) return;
+    // An open dialog owns Escape and every other key.
+    if (document.querySelector('dialog[open]')) return;
+    if (event.key === 'Escape') {
+      if (resultsOpen) setResultsOpen(false);
+      else if (narrow && expanded) setTimeline(false);
+      else if (watchMode) setWatchMode(false);
+      return;
+    }
+    const mod = event.metaKey || event.ctrlKey;
+    const emptyStart = event.target === startField.current && !input;
+    if (claimsKey(event.target, event.key) && !(mod && emptyStart)) return;
+    if (mod) {
+      if (event.key.toLowerCase() === 'z' && removed && !event.shiftKey) {
+        event.preventDefault();
+        undoRemove();
+      }
+      return;
+    }
+    const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
+    if (key === '/') {
+      if (watchMode) return;
+      event.preventDefault();
+      (vods.length ? addField : startField).current?.focus();
+      return;
+    }
+    if (!vods.length) return;
+    const actions: Record<string, () => void> = {
+      ' ': playback,
+      j: () => skip(-10),
+      l: () => skip(10),
+      ArrowLeft: () => skip(-5),
+      ArrowRight: () => skip(5),
+      t: () => setTimeline(!expanded),
+      f: () => setWatchMode((on) => !on),
+      s: resync,
+    };
+    const action = actions[key];
+    if (!action) return;
+    event.preventDefault();
+    action();
+  };
+  useEffect(() => {
+    const listen = (event: KeyboardEvent) => shortcuts.current(event);
+    addEventListener('keydown', listen);
+    return () => removeEventListener('keydown', listen);
+  }, []);
 
   const preparing = command?.phase === 'preparing';
   const starting = command?.phase === 'starting';
@@ -556,76 +749,332 @@ export default function App() {
   const bufferProgress = preparing
     ? seekBarrier(vods, command.moment, command.serial, playbackStates)
     : null;
+  const intent = preparing || starting ? command.playing : playing;
+  const coverable = vods.some(
+    (vod) => supportsPlayback(vod) && matchMoment(vod, moment).state === 'playing',
+  );
+  const source = vods.find((vod) => vodKey(vod) === leaderKey);
+  // A soloed recording that doesn't cover the moment hands audio back to the source.
+  const soloed = vods.find(
+    (vod) => vodKey(vod) === audioKey && matchMoment(vod, moment).state === 'playing',
+  );
+  const audibleKey = soloed ? audioKey : '';
+  const bounds = vods.length ? timelineBounds(vods) : undefined;
+  const overlap = overlapRange(vods);
+  const range = vods.length
+    ? viewRange(vods, zoom === 'overlap' && overlap ? 'overlap' : 'all')
+    : undefined;
+  const dismiss = (run: () => void) => ({ label: 'Dismiss', icon: <X size={15} />, onClick: run });
+  function barStatus(): BarStatus {
+    if (notice)
+      return {
+        tone: 'signal',
+        icon: 'alert',
+        text: notice,
+        title: notice,
+        announce: notice,
+        actions: [dismiss(() => setNotice(''))],
+      };
+    if (bufferProgress && bufferProgress.total > 0) {
+      const slow = Date.now() - seekStartedAt > 15000;
+      const waiting = bufferProgress.waiting.map((vod) => vod.channel).join(', ');
+      return {
+        icon: 'spin',
+        title: waiting ? `Waiting on ${waiting}` : undefined,
+        announce: slow ? 'Still lining up' : 'Lining up',
+        text: (
+          <>
+            <b>{slow ? 'Still lining up' : 'Lining up'}</b>{' '}
+            <span className="mono">
+              {bufferProgress.ready}/{bufferProgress.total}
+            </span>
+            {waiting && <> · {waiting}</>}
+          </>
+        ),
+        actions: [
+          ...(slow && command
+            ? [
+                {
+                  label: 'Retry',
+                  icon: <RotateCw size={15} />,
+                  onClick: () => syncTo(command.moment, command.playing, command.leader),
+                },
+              ]
+            : []),
+          { label: 'Cancel', icon: <X size={15} />, onClick: cancelSeek },
+        ],
+      };
+    }
+    if (startingProgress && startingProgress.total > 0)
+      return {
+        icon: 'spin',
+        title: startingProgress.waiting.map((vod) => vod.channel).join(', '),
+        announce: 'Starting',
+        text: (
+          <>
+            <b>Starting</b>{' '}
+            <span className="mono">
+              {startingProgress.started}/{startingProgress.total}
+            </span>{' '}
+            · try <span className="mono">{(command?.startAttempt ?? 0) + 1}/3</span>
+          </>
+        ),
+        actions: [{ label: 'Cancel start', icon: <X size={15} />, onClick: cancelSeek }],
+      };
+    if (removed?.shownAt)
+      return {
+        tone: 'ink',
+        text: `Closed ${removed.vod.channel}`,
+        announce: `Closed ${removed.vod.channel}`,
+        actions: [
+          { label: 'Undo (⌘Z)', icon: <Undo2 size={15} />, onClick: undoRemove },
+          dismiss(() => setRemoved((r) => (r ? { ...r, shownAt: 0 } : r))),
+        ],
+      };
+    if (flash) return { tone: 'success', icon: 'check', text: flash, announce: flash };
+    if (!coverable)
+      return {
+        text: 'No recording covers this moment',
+        announce: 'No recording covers this moment',
+      };
+    const summary = syncSummary(vods, moment, playbackStates, leaderKey);
+    return {
+      // Drift values change every half second; the summary isn't announced.
+      text: (
+        <>
+          {summary.inSync > 0 && (
+            <span className="summary-item">
+              <i className="dot success" /> {summary.inSync} in sync
+            </span>
+          )}
+          {summary.drifting.map(({ vod, drift }) => (
+            <span className="summary-item" key={vodKey(vod)}>
+              <i className="dot warning" /> {vod.channel}{' '}
+              <span className="mono warning">{formatDelta(drift)}</span>
+            </span>
+          ))}
+          {summary.unverified > 0 && (
+            <span className="summary-item">{summary.unverified} not verified</span>
+          )}
+          {soloed && <span className="summary-item">listening to {soloed.channel}</span>}
+        </>
+      ),
+      actions:
+        source && summary.drifting.length
+          ? [
+              {
+                label: `Resync to ${source.channel} (S)`,
+                icon: <RefreshCw size={15} />,
+                onClick: resync,
+              },
+            ]
+          : audioKey
+            ? [
+                {
+                  label: 'Follow the source audio',
+                  icon: <X size={15} />,
+                  onClick: () => setAudioKey(''),
+                },
+              ]
+            : [],
+    };
+  }
+  const resultRows = busy
+    ? pending.map((item) => ({ input: item, status: 'pending' as const }))
+    : results;
+  const playLabel = preparing
+    ? command.playing
+      ? 'Stay paused after lining up'
+      : 'Play when ready'
+    : intent
+      ? 'Pause all'
+      : 'Play all';
   return (
     <div
-      className={`app-shell ${watchMode ? 'watch-mode' : ''} ${vods.length > 3 ? 'balanced-grid' : ''}`}
+      className={`app ${watchMode ? 'watch-mode' : ''} ${vods.length > 3 ? 'fit-height' : ''} ${vods.length ? '' : 'is-empty'}`}
     >
       <div className="sr-only" role="status" aria-live="polite">
         {orderAnnouncement}
       </div>
       <header className="topbar">
         <a className="brand" href={import.meta.env.BASE_URL}>
-          VOD <span>Sync</span>
+          <BrandMark />
+          VOD Sync
         </a>
-        <div className="app-actions">
-          <button
-            className="button"
-            aria-label="Share session"
-            onClick={share}
-            disabled={!vods.length}
-          >
-            {copied === 'session' ? <Check size={14} /> : <Share2 size={14} />}
-            <span>{copied === 'session' ? 'Copied' : 'Share'}</span>
-          </button>
-          <button
-            className="button watch-button"
-            aria-label="Watch mode"
-            onClick={() => setWatchMode(true)}
-            disabled={!vods.length}
-          >
-            <Maximize2 size={14} />
-            <span>Watch mode</span>
-          </button>
-          <details className="menu">
-            <summary className="icon-button" aria-label="More options">
-              <MoreHorizontal size={20} />
-            </summary>
-            <div className="menu-content">
-              <button onClick={() => importInput.current?.click()} disabled={busy}>
-                <FileUp size={15} />
+        {!!vods.length && bounds && (
+          <>
+            <span className="topbar-divider" />
+            <span className="session-meta">
+              <b>
+                {vods.length} recording{vods.length === 1 ? '' : 's'}
+              </b>{' '}
+              · {formatSpan(bounds.max - bounds.min)}
+            </span>
+            <div className="add" ref={addForm}>
+              <form className="add-field" onSubmit={addRecordings} aria-label="Add recordings">
+                <Plus size={16} aria-hidden="true" />
+                <label htmlFor="vod-input" className="sr-only">
+                  Add recordings
+                </label>
+                <textarea
+                  ref={addField}
+                  id="vod-input"
+                  rows={1}
+                  value={input}
+                  spellCheck={false}
+                  onChange={(e) => setInput(e.target.value)}
+                  placeholder={`Add a VOD, clip or twitch/name at ${clock(moment, localTime)}`}
+                  aria-describedby={resultsOpen ? 'add-results' : undefined}
+                  disabled={busy}
+                  onFocus={() => results.length && setResultsOpen(true)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      void addRecordings();
+                    }
+                  }}
+                />
+                {busy ? (
+                  <LoaderCircle className="spin" size={15} aria-label="Looking up" />
+                ) : (
+                  <Kbd>/</Kbd>
+                )}
+              </form>
+              {resultsOpen && !!resultRows.length && (
+                <div className="add-results" id="add-results" role="status">
+                  {resultRows.map((row) => (
+                    <div className={`add-row ${row.status}`} key={row.input}>
+                      <span className="add-icon" aria-hidden="true">
+                        {row.status === 'pending' ? (
+                          <LoaderCircle className="spin" size={14} />
+                        ) : row.status === 'added' ? (
+                          <Check size={14} />
+                        ) : row.status === 'existing' ? (
+                          '–'
+                        ) : (
+                          <X size={14} />
+                        )}
+                      </span>
+                      <span className="add-text">
+                        <span className="mono">{shortInput(row.input)}</span>
+                        {row.status === 'failed' && <span className="add-error">{row.error}</span>}
+                      </span>
+                      <span className="add-detail">
+                        {row.status === 'pending' && 'Looking up'}
+                        {(row.status === 'added' || row.status === 'existing') && (
+                          <>
+                            <PlatformMark platform={row.vod.platform} /> {row.vod.channel}
+                            {row.status === 'existing' ? (
+                              ' · already in session'
+                            ) : (
+                              <span className="mono"> {formatTime(row.offsetSeconds)}</span>
+                            )}
+                          </>
+                        )}
+                        {row.status === 'failed' && (
+                          <button
+                            className="text-btn"
+                            onClick={() => {
+                              // Failed inputs are already back in the field; select this one.
+                              const field = addField.current;
+                              setResultsOpen(false);
+                              if (!field) return;
+                              field.focus();
+                              const at = field.value.indexOf(row.input);
+                              if (at >= 0) field.setSelectionRange(at, at + row.input.length);
+                            }}
+                          >
+                            Edit
+                          </button>
+                        )}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </>
+        )}
+        <div className="topbar-actions">
+          {vods.length ? (
+            <>
+              <button
+                className="ghost-btn share-btn"
+                onClick={share}
+                aria-label="Share link"
+                title="Copy a link to this session"
+              >
+                <Share2 size={15} aria-hidden="true" />
+                <span>Share link</span>
+              </button>
+              <button
+                className="inverse-btn"
+                onClick={() => setWatchMode(true)}
+                title="Watch mode (F)"
+              >
+                <Maximize2 size={15} />
+                <span>Watch mode</span>
+                <Kbd>F</Kbd>
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                className="ghost-btn"
+                onClick={() => importInput.current?.click()}
+                disabled={busy}
+              >
                 Import session
               </button>
-              <button onClick={exportSession} disabled={!vods.length}>
-                <Download size={15} />
-                Export session
+              <button className="ghost-btn" onClick={() => setModal('help')}>
+                How syncing works
               </button>
-              <button onClick={() => setModal('settings')}>
-                <Settings2 size={15} />
-                Twitch connection
-              </button>
-              <button onClick={() => setModal('help')}>
-                <Info size={15} />
-                Help
-              </button>
-              <a
-                href="https://github.com/Frozandero/twitch-vod-sync-monolith"
-                target="_blank"
-                rel="noreferrer"
-              >
-                <ExternalLink size={15} />
-                GitHub
-              </a>
-              <button onClick={clearWorkspace} disabled={busy || !vods.length}>
-                <Trash2 size={15} />
-                Clear workspace
-              </button>
-            </div>
-          </details>
+            </>
+          )}
+          <button
+            ref={menuButton}
+            className="icon-btn"
+            aria-label="More options"
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
+            onClick={() => setMenuOpen((open) => !open)}
+          >
+            <MoreHorizontal size={18} />
+          </button>
+          <Menu
+            anchor={menuButton}
+            open={menuOpen}
+            onClose={() => setMenuOpen(false)}
+            label="More options"
+            items={[
+              {
+                label: 'Import session',
+                onSelect: () => importInput.current?.click(),
+                disabled: busy,
+              },
+              { label: 'Export session', onSelect: exportSession, disabled: !vods.length },
+              { label: 'Twitch connection', onSelect: () => setModal('settings') },
+              { label: 'Help and shortcuts', onSelect: () => setModal('help') },
+              {
+                label: 'GitHub',
+                onSelect: () => {},
+                href: 'https://github.com/Frozandero/twitch-vod-sync-monolith',
+              },
+              'separator',
+              {
+                label: 'Clear workspace',
+                onSelect: () => clearWorkspace(),
+                disabled: busy || !vods.length,
+                danger: true,
+              },
+            ]}
+          />
         </div>
       </header>
       <input
-        className="visually-hidden"
+        className="sr-only"
         ref={importInput}
+        tabIndex={-1}
         type="file"
         accept="application/json,.json"
         aria-label="Session JSON file"
@@ -641,88 +1090,42 @@ export default function App() {
           e.target.value = '';
         }}
       />
-      <form className="add-bar" onSubmit={addRecordings}>
-        <label htmlFor="vod-input">VODs / clips / streamers</label>
-        <textarea
-          id="vod-input"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder="VODs, clips, twitch/name or kick/name · one per line"
-          rows={1}
-          disabled={busy}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault();
-              void addRecordings();
-            }
-          }}
-        />
-        <button className="button primary" type="submit" disabled={busy || authLoading}>
-          {busy ? <LoaderCircle className="spin" size={15} /> : <Plus size={16} />}{' '}
-          {busy ? 'Loading…' : 'Add'}
-        </button>
-      </form>
-      {notice && (
-        <div className="notice" role="alert">
-          <span>{notice}</span>
-          <button
-            className="icon-button"
-            aria-label="Dismiss message"
-            onClick={() => setNotice('')}
-          >
-            <X size={16} />
-          </button>
-        </div>
-      )}
-      {removed && (
-        <div className="undo-notice" role="status">
-          <span>Closed {removed.vod.channel}</span>
-          <button className="text-button" onClick={undoRemove} disabled={busy}>
-            <Undo2 size={14} /> Undo
-          </button>
-          <button
-            className="icon-button"
-            aria-label="Dismiss undo"
-            onClick={() => setRemoved(undefined)}
-          >
-            <X size={14} />
-          </button>
-        </div>
-      )}
-      {!!failures.length && (
-        <div className="lookup-errors" role="alert">
-          {failures.map((failure, i) => (
-            <div key={i}>
-              <strong>{failure.input}</strong>
-              <span>{failure.error}</span>
-            </div>
-          ))}
-        </div>
-      )}
       {demo && (
         <div className="demo-banner">
           <span>Demo · simulated players and sample timing</span>
-          <button className="text-button" onClick={clearWorkspace}>
-            Close demo <X size={13} />
+          <button className="text-btn" onClick={() => clearWorkspace()}>
+            Close demo
           </button>
         </div>
       )}
-      <main className={`workspace ${!vods.length ? 'empty' : ''}`}>
+      <main className="workspace">
         {!vods.length ? (
-          <div className="empty-state">
-            <h1>Add recordings</h1>
-            <p>
-              Start with a VOD or clip. Then add twitch/name or kick/name to find matching
-              recordings.
-            </p>
-          </div>
+          <StartScreen
+            field={startField}
+            input={input}
+            onInput={setInput}
+            onSubmit={addRecordings}
+            busy={busy}
+            pending={pending}
+            results={results}
+            notice={notice}
+            recent={recent}
+            onOpen={loadSession}
+            onForget={(savedAt) => {
+              const next = recent.filter((entry) => entry.savedAt !== savedAt);
+              writeRecent(next);
+              setRecent(next);
+            }}
+            closed={removed?.vod.channel}
+            onUndo={undoRemove}
+          />
         ) : (
           <div
             ref={grid}
             className={`player-grid ${draggingKey ? 'is-reordering' : ''}`}
             style={{
               gridTemplateColumns: `repeat(${tracks}, minmax(0, 1fr))`,
-              gridTemplateRows: `repeat(${rows}, minmax(338px, 1fr))`,
+              gridTemplateRows: `repeat(${rows}, minmax(var(--tile-min-height), 1fr))`,
             }}
           >
             {/* Keep iframe DOM positions stable: moving an iframe reloads Twitch even with React keys. */}
@@ -739,29 +1142,35 @@ export default function App() {
                   onSync={syncFrom}
                   onStopped={playerStopped}
                   onDuration={updateDuration}
-                  workspaceControls={
-                    vod === vods[Math.min(columns, vods.length) - 1] && (
-                      <>
-                        {watchMode && (
-                          <button
-                            className="icon-button"
-                            aria-label="Exit watch mode"
-                            title="Exit watch mode (Esc)"
-                            onClick={() => setWatchMode(false)}
-                          >
-                            <Minimize2 size={14} />
-                          </button>
-                        )}
-                        <TimelineToggle
-                          collapsed={timelineCollapsed}
-                          onToggle={() => {
-                            setTimelineCollapsed(!timelineCollapsed);
-                            writeStorage('vodsync.timelineCollapsed', String(!timelineCollapsed));
-                          }}
-                        />
-                      </>
-                    )
-                  }
+                  drift={driftSeconds(vod, moment, playbackStates[vodKey(vod)])}
+                  sourceName={source?.channel ?? 'the source'}
+                  audioKey={audibleKey}
+                  soloed={audioKey === vodKey(vod)}
+                  busy={busy}
+                  localTime={localTime}
+                  onSolo={() => {
+                    setAudioKey(vodKey(vod));
+                    showFlash(`Listening to ${vod.channel} only`);
+                  }}
+                  onSeekTo={(offset, correction) => {
+                    // A just-flushed offset hasn't reached state yet; seek with it anyway.
+                    const timed =
+                      correction === undefined ? vod : { ...vod, correctionSeconds: correction };
+                    setNotice('');
+                    syncTo(momentAt(timed, offset), false, vodKey(vod));
+                  }}
+                  onJump={seekShared}
+                  onCorrect={(seconds) => {
+                    const next = vods.map((v) =>
+                      vodKey(v) === vodKey(vod) ? { ...v, correctionSeconds: seconds } : v,
+                    );
+                    const nextBounds = timelineBounds(next);
+                    const resume = playIntent();
+                    setVods(next);
+                    setNotice('');
+                    syncTo(Math.max(nextBounds.min, Math.min(nextBounds.max, moment)), resume);
+                  }}
+                  onCopy={(url) => void copy(url, `${vod.channel} timestamp link copied`)}
                   order={{
                     index: vods.indexOf(vod),
                     position: positions[vods.indexOf(vod)],
@@ -796,65 +1205,36 @@ export default function App() {
                     onArrange: () => setArranging(true),
                   }}
                   onRemove={() => remove(vod)}
-                  onSettings={() => {
-                    if (!busy) setEditing(vod);
-                  }}
                 />
               ))}
           </div>
         )}
       </main>
-      {startingProgress && startingProgress.total > 0 && (
-        <div className="buffer-status" role="status">
-          <LoaderCircle className="spin" size={14} />
-          <span title={startingProgress.waiting.map((vod) => vod.channel).join(', ')}>
-            Starting · {startingProgress.started}/{startingProgress.total} playing
-          </span>
-          <button className="text-button" onClick={cancelSeek}>
-            Cancel start
-          </button>
-        </div>
-      )}
-      {bufferProgress && bufferProgress.total > 0 && (
-        <div className="buffer-status" role="status">
-          <LoaderCircle className="spin" size={14} />
-          <span title={bufferProgress.waiting.map((vod) => vod.channel).join(', ')}>
-            {Date.now() - seekStartedAt > 15000 ? 'Still waiting' : 'Buffering'} ·{' '}
-            {bufferProgress.ready}/{bufferProgress.total} ready
-            {command?.playing ? ' · will resume together' : ' · staying paused'}
-          </span>
-          {Date.now() - seekStartedAt > 15000 && command && (
-            <button
-              className="text-button"
-              onClick={() => syncTo(command.moment, command.playing, command.leader)}
-            >
-              Retry
-            </button>
-          )}
-          <button className="text-button" onClick={cancelSeek}>
-            Cancel wait
-          </button>
-        </div>
-      )}
-      {!!vods.length && (
-        <Timeline
-          collapsed={timelineCollapsed}
+      {!!vods.length && range && (
+        <PlaybackBar
           vods={vods}
+          clips={clips}
           moment={moment}
-          playing={preparing || starting ? command.playing : playing}
-          preparing={preparing}
-          playbackStates={playbackStates}
-          onSeek={(time) => {
-            const leader =
-              vods.find((v) => supportsPlayback(v) && matchMoment(v, time).state === 'playing') ??
-              vods.find((v) => matchMoment(v, time).state === 'playing');
-            syncTo(
-              time,
-              preparing || starting ? command.playing : playersArePlaying(),
-              leader ? vodKey(leader) : leaderKey,
-            );
-          }}
+          playing={intent}
+          canPlay={intent || preparing || starting || coverable}
+          playLabel={playLabel}
           onPlayback={playback}
+          onSkip={skip}
+          localTime={localTime}
+          onLocalTime={setLocalTime}
+          zoom={zoom === 'overlap' && overlap ? 'overlap' : 'all'}
+          onZoom={setZoom}
+          overlap={overlap}
+          range={range}
+          expanded={expanded}
+          onExpanded={setTimeline}
+          watchMode={watchMode}
+          onExitWatch={() => setWatchMode(false)}
+          sheet={narrow}
+          status={barStatus()}
+          leaderKey={leaderKey}
+          playbackStates={playbackStates}
+          onSeek={seekShared}
           onRemove={remove}
         />
       )}
@@ -863,8 +1243,10 @@ export default function App() {
           <div className="order-list">
             {vods.map((vod, index) => (
               <div className="order-row" key={vodKey(vod)}>
+                <PlatformMark platform={vod.platform} />
                 <span title={vod.title}>{vod.channel}</span>
                 <select
+                  className="field"
                   aria-label={`Grid position for ${vod.channel}`}
                   value={index}
                   disabled={busy}
@@ -877,7 +1259,7 @@ export default function App() {
                   ))}
                 </select>
                 <button
-                  className="icon-button"
+                  className="icon-btn"
                   aria-label={`Move ${vod.channel} earlier`}
                   title="Move earlier"
                   disabled={busy || index === 0}
@@ -886,7 +1268,7 @@ export default function App() {
                   <ArrowLeft size={16} />
                 </button>
                 <button
-                  className="icon-button"
+                  className="icon-btn"
                   aria-label={`Move ${vod.channel} later`}
                   title="Move later"
                   disabled={busy || index === vods.length - 1}
@@ -897,27 +1279,6 @@ export default function App() {
               </div>
             ))}
           </div>
-        </Modal>
-      )}
-      {editing && (
-        <Modal title={editing.channel} close={() => setEditing(undefined)}>
-          <RecordingSettings
-            vod={editing}
-            moment={moment}
-            onSeek={(time) => {
-              syncTo(momentAt(editing, parseTime(time)), false, vodKey(editing));
-              setEditing(undefined);
-            }}
-            onCorrect={(seconds) => {
-              const next = vods.map((v) =>
-                vodKey(v) === vodKey(editing) ? { ...v, correctionSeconds: seconds } : v,
-              );
-              const bounds = timelineBounds(next);
-              setVods(next);
-              syncTo(Math.max(bounds.min, Math.min(bounds.max, moment)), false);
-              setEditing(undefined);
-            }}
-          />
         </Modal>
       )}
       {modal === 'settings' && (
@@ -931,7 +1292,7 @@ export default function App() {
               <>
                 <p>Connected to Twitch.</p>
                 <button
-                  className="button"
+                  className="outline-btn"
                   onClick={() => {
                     disconnect();
                     setAuth(undefined);
@@ -945,6 +1306,7 @@ export default function App() {
                 <label>
                   Public Client ID
                   <input
+                    className="field"
                     value={clientId}
                     onChange={(e) => setClientId(e.target.value)}
                     placeholder="Twitch application Client ID"
@@ -964,7 +1326,7 @@ export default function App() {
                   sessions.
                 </small>
                 <button
-                  className="button primary"
+                  className="primary-btn"
                   onClick={() => {
                     try {
                       writeStorage('vodsync.clientId', clientId);
@@ -986,127 +1348,64 @@ export default function App() {
         <Modal title="Using VOD Sync" close={() => setModal(null)}>
           <div className="help-content">
             <p>
-              Paste Twitch or Kick VOD/clip URLs, timestamped URLs, or Twitch IDs. The first
-              recording sets the initial moment. Adding a timestamped URL or clip selects that
-              moment in its parent VOD.
+              Paste Twitch or Kick VOD or clip links, timestamped links, or Twitch IDs. The first
+              recording sets the moment; a timestamped link or clip selects that moment in its
+              parent VOD. Add <code>twitch/name</code> or <code>kick/name</code> to find that
+              streamer’s past broadcast covering the selected moment.
             </p>
             <p>
-              Add twitch/name or kick/name (or a channel URL) to find that streamer's VOD at the
-              selected timeline moment. You can paste several targets, including alongside a source
-              VOD or clip. Only available past broadcasts covering that moment are added.
+              Each player’s sync button moves everyone to its moment. The source supplies the clock
+              and the audio; “Listen to … only” in a player’s menu switches the audio. Use Timing in
+              the same menu to jump to a timestamp or nudge a fixed delay.
             </p>
             <p>
-              <strong>Grid:</strong> seek any player, then click its Sync button. The others jump to
-              the same broadcast time and follow its play/pause state. The chosen player supplies
-              audio; each player also has its own mute button. Drag a header’s grip to reorder, or
-              click it to choose a position. When the grip is focused, arrow keys move the player
-              and Home/End move it to the first/last position. Closing a recording offers Undo.
+              The playback bar plays and pauses everyone, shows the selected moment, and reports
+              whether players are in sync. The timeline below it covers every recording; drag it to
+              seek, or zoom to the part every recording covers. Thin blue lines mark the selected
+              moment; thicker markers show each player’s verified position. Diamonds mark clips.
             </p>
+            <dl className="shortcuts">
+              <dt>
+                <Kbd>Space</Kbd>
+              </dt>
+              <dd>Play or pause everyone</dd>
+              <dt>
+                <Kbd>J</Kbd> <Kbd>L</Kbd>
+              </dt>
+              <dd>Back or forward 10 seconds</dd>
+              <dt>
+                <Kbd>←</Kbd> <Kbd>→</Kbd>
+              </dt>
+              <dd>Back or forward 5 seconds</dd>
+              <dt>
+                <Kbd>S</Kbd>
+              </dt>
+              <dd>Resync everyone to the source</dd>
+              <dt>
+                <Kbd>T</Kbd>
+              </dt>
+              <dd>Show or hide the timeline</dd>
+              <dt>
+                <Kbd>F</Kbd> <Kbd>Esc</Kbd>
+              </dt>
+              <dd>Enter or leave watch mode</dd>
+              <dt>
+                <Kbd>/</Kbd>
+              </dt>
+              <dd>Add recordings</dd>
+              <dt>
+                <Kbd>⌘Z</Kbd>
+              </dt>
+              <dd>Undo closing a recording</dd>
+            </dl>
             <p>
-              <strong>Timeline:</strong> click or drag along the timeline to seek all recordings.
-              The range covers every recording, including gaps. The play button starts recordings
-              that cover the selected moment. Thin lines mark the selection; thicker markers show
-              reported player positions. Ahead/behind labels show drift; a player with no reported
-              clock is marked Not verified.
-            </p>
-            <p>
-              <strong>Timestamp links:</strong> use the go-to icon next to a timeline timestamp or
-              above a player. Hide or show the timeline with its toggle; playback continues. Use a
-              recording’s settings to change its timestamp or correct a fixed delay.
-            </p>
-            <p>
-              Watch mode hides setup controls; Escape leaves it. Ads and buffering can shift
-              playback, so sync again when needed. Finished players are removed to stop Up Next;
-              seek earlier to replay the original VOD. Expired/private videos, missing clip parents,
-              and edited uploads may not work. Twitch players require at least 400 × 300 pixels;
-              small screens can scroll inside the player.
-            </p>
-            <p>
-              Kick VODs play here with the same sync, pause, and buffering controls. Clips select
-              their moment in the parent VOD. Playback requires a public playlist from Kick; use the
-              timestamp link if a recording cannot load. Some newer Kick links block external
-              metadata requests. Public metadata services are undocumented and can change.
+              Ads, buffering and stream delays can shift playback, so sync again when needed.
+              Finished players are unloaded so Twitch can’t autoplay another VOD; seek earlier to
+              bring them back. Twitch players need at least 400 × 300 pixels. Kick VODs play here
+              when Kick returns a public playlist; otherwise use the timestamp link.
             </p>
           </div>
         </Modal>
-      )}
-    </div>
-  );
-}
-
-function RecordingSettings({
-  vod,
-  moment,
-  onSeek,
-  onCorrect,
-}: {
-  vod: Vod;
-  moment: number;
-  onSeek: (time: string) => void;
-  onCorrect: (seconds: number) => void;
-}) {
-  const match = matchMoment(vod, moment);
-  const [time, setTime] = useState(
-    formatTime(Math.min(match.offsetSeconds, vod.durationSeconds - 1)),
-  );
-  const [correction, setCorrection] = useState(String(vod.correctionSeconds));
-  const [error, setError] = useState('');
-  return (
-    <div className="form-stack">
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          try {
-            onSeek(time);
-          } catch (error) {
-            setError(messageOf(error));
-          }
-        }}
-      >
-        <label>
-          Seek all from this VOD
-          <input
-            value={time}
-            onChange={(e) => setTime(e.target.value)}
-            aria-label={`${vod.channel} timestamp`}
-            placeholder="00:00:00"
-          />
-        </label>
-        <button className="button primary" type="submit">
-          Seek all
-        </button>
-      </form>
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          const seconds = Number(correction);
-          if (!Number.isFinite(seconds) || Math.abs(seconds) > 86400) {
-            setError('Enter a correction within 24 hours.');
-            return;
-          }
-          onCorrect(seconds);
-        }}
-      >
-        <label>
-          Timing adjustment · seconds
-          <input
-            type="number"
-            step="0.1"
-            min="-86400"
-            max="86400"
-            value={correction}
-            onChange={(e) => setCorrection(e.target.value)}
-          />
-        </label>
-        <small>Positive values shift the recording start later.</small>
-        <button className="button" type="submit">
-          Apply adjustment
-        </button>
-      </form>
-      {error && (
-        <p className="error" role="alert">
-          {error}
-        </p>
       )}
     </div>
   );
