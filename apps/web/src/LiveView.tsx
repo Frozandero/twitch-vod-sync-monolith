@@ -202,15 +202,18 @@ function LivePlayer({
           awaitingStart.current = false;
           const current = twitch.getChannel?.();
           if (typeof current === 'string' && current && current.toLowerCase() !== channel.channel) {
+            // Like a foreign VOD, the other channel's player is removed, not just paused.
             moved.current = true;
             setMovedTo(current);
             twitch.pause();
+            embed.current = null;
+            setTimeout(() => alive && node.replaceChildren());
             setTwitchState('offline');
             return;
           }
           setTwitchState('live');
         });
-        on(PlayerClass.PAUSE, () => alive && setTwitchState('paused'));
+        on(PlayerClass.PAUSE, () => alive && !moved.current && setTwitchState('paused'));
         on(PlayerClass.OFFLINE, () => alive && setTwitchState('offline'));
         on(PlayerClass.ENDED, () => alive && setTwitchState('offline'));
         on(PlayerClass.ONLINE, () => {
@@ -253,10 +256,13 @@ function LivePlayer({
     if (playing) twitch.play();
     else twitch.pause();
   }, [playing]);
-  // A moved embed comes back to its own channel once the lookup sees that channel live.
+  // A moved embed comes back to its own channel while the lookup sees that channel live,
+  // at most once a minute so a lagging status can't loop it.
   useEffect(() => {
-    if (moved.current && online === true) setAttempt((n) => n + 1);
-  }, [online]);
+    if (!movedTo || online !== true) return;
+    const timer = setTimeout(() => setAttempt((n) => n + 1), 60000);
+    return () => clearTimeout(timer);
+  }, [online, movedTo]);
   useEffect(() => {
     embed.current?.setMuted(muted);
   }, [muted]);
@@ -341,6 +347,7 @@ function LivePlayer({
     <article
       className={`tile ${order.dragging ? 'is-dragging' : ''} ${order.target ? 'is-drop-target' : ''}`}
       aria-label={`${channel.name} live player`}
+      data-live-key={key}
       style={{
         order: order.index,
         gridRow: order.position.row,

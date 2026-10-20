@@ -695,7 +695,9 @@ export default function App() {
     const neighbour = next[Math.min(live.indexOf(channel), next.length - 1)];
     requestAnimationFrame(() =>
       document
-        .querySelector<HTMLElement>(`[aria-label="More for ${CSS.escape(neighbour.name)}"]`)
+        .querySelector<HTMLElement>(
+          `[data-live-key="${CSS.escape(liveKey(neighbour))}"] [aria-label^="More for"]`,
+        )
         ?.focus({ preventScroll: true }),
     );
   }
