@@ -1,4 +1,4 @@
-import { resolveKick, resolveKickChannel } from './kick';
+import { resolveKick, resolveKickChannel, resolveKickLive } from './kick';
 export { resolveKickPlayback } from './kick';
 import {
   parseMedia,
@@ -6,7 +6,9 @@ import {
   matchMoment,
   startMs,
   parseTime,
+  validateLiveChannel,
   validateVod,
+  type LiveChannel,
   type MediaRef,
   type ResolvedMedia,
   type Vod,
@@ -136,6 +138,61 @@ export async function resolveChannelTarget(
   throw new Error(
     `No available Twitch past broadcast for ${channel} covers ${new Date(momentMs).toISOString()}. Checked up to ${auth ? 1000 : 300} recent recordings; older, deleted, or unavailable VODs may be missing.`,
   );
+}
+// A live channel plays at its own live edge; the lookup only confirms the channel and
+// whether it is broadcasting now. Offline channels are returned so a live session can wait.
+export async function resolveLiveChannel(
+  input: string,
+  auth?: TwitchAuth,
+  fetcher: Fetcher = fetch,
+): Promise<{ channel: LiveChannel; live: boolean }> {
+  const target = parseChannelTarget(input);
+  if (!target) throw new Error('Use twitch/name, kick/name, or a channel URL for a live channel.');
+  try {
+    if (target.platform === 'kick') return await resolveKickLive(target.channel, fetcher);
+    const { channel } = target;
+    if (auth) {
+      const user = await helix(
+        `users?login=${encodeURIComponent(channel)}`,
+        auth,
+        fetcher,
+        `Twitch channel ${channel} was not found.`,
+      );
+      if (typeof user.login !== 'string' || user.login.toLowerCase() !== channel)
+        throw new Error('Twitch returned a different channel.');
+      const streams = await json(
+        `https://api.twitch.tv/helix/streams?user_login=${encodeURIComponent(channel)}`,
+        { headers: { 'Client-ID': auth.clientId, Authorization: `Bearer ${auth.token}` } },
+        fetcher,
+      );
+      if (!Array.isArray(streams.data)) throw new Error('Twitch returned an invalid stream list.');
+      const stream = streams.data[0];
+      return {
+        channel: validateLiveChannel({ platform: 'twitch', channel, name: user.display_name }),
+        // Like the public lookup, any current stream of this channel counts as live.
+        live: !!stream && String(stream.user_login).toLowerCase() === channel,
+      };
+    }
+    const data = await gql(
+      'query StreamSyncLive($login: String!) { user(login: $login) { login displayName stream { id type } } }',
+      { login: channel },
+      fetcher,
+    );
+    if (!data?.user) throw new Error(`Twitch channel ${channel} was not found.`);
+    if (typeof data.user.login !== 'string' || data.user.login.toLowerCase() !== channel)
+      throw new Error('Twitch returned a different channel.');
+    return {
+      channel: validateLiveChannel({ platform: 'twitch', channel, name: data.user.displayName }),
+      live: typeof data.user.stream?.id === 'string',
+    };
+  } catch (error) {
+    if (
+      error instanceof TypeError ||
+      (error instanceof DOMException && ['TimeoutError', 'AbortError'].includes(error.name))
+    )
+      throw new Error('Could not reach Twitch. Retry or connect Twitch in Settings.');
+    throw error;
+  }
 }
 async function gql(query: string, variables: object, fetcher: Fetcher) {
   const payload = await json(

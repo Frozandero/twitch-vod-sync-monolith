@@ -4,6 +4,26 @@ Last updated: 2026-10-20.
 
 This file records actual checks and their limits. A passing build does not prove third-party playback is available.
 
+## Live multi-view and StreamSync name — 2026-10-20
+
+- The owner approved live multi-view for Twitch and Kick (shared play, pause and mute; no syncing or seeking), Kick live control by reloading its documented embed, channel inputs opening live only in an empty workspace or inside a live session, first-channel audio, offline channels waiting inside live sessions, VOD inputs refused in live sessions, and a name-only rename to StreamSync.
+- `npm run check` passed: TypeScript, 234 tests (new coverage for live session validation, share-link round trips and credential stripping, Twitch public and Helix live lookups, Kick live lookups that never expose `playback_url`, live input routing, and live entries in recent sessions), and the production build.
+- Real channels in the desktop app's built-in browser at 1440×900:
+  - Twitch summit1g and xQc with Kick xQc and n3on played together, with Twitch latency readouts of 1.7–2.9 s.
+  - Adding Kick iceposeidon and n3on to a running session worked, and a VOD link in the same batch was refused with its explanation and left in the field.
+  - Pause all removed the Kick embeds and paused Twitch; Play all (Space) recreated them at the live edge.
+  - Only the first channel had sound; unmuting a Kick tile reloaded it with `muted=false`; Listen to loltyler1 only muted the rest.
+  - Closing HasanAbi (offline, showing Twitch's offline card) and pressing Ctrl+Z restored it at its position while the others kept playing.
+  - A reload restored the live session paused from local storage, and a `#live=` link opened the same five channels in order.
+- At 375×812 the live headers fit without horizontal overflow and players stack above the bar.
+- Known limits:
+  - Kick Roshtein and Classybeef (Slots & Casino) showed offline inside Kick's embed although the API reported them live; reloading did not help.
+  - Two Twitch channels did not start when the session opened and needed a Play all press; such holds now show _press play_ after eight seconds.
+  - The clipboard refused a synthetic Share click; a real click copied the link.
+  - During a Twitch pre-roll ad, loltyler1's tile read paused, and the scaled test view stopped repainting both Twitch frames; this was not investigated further.
+  - Not verified: Kick embeds on physical phones, Safari, screen readers, sessions with many live channels, and the official Twitch connection's Helix stream lookup (fixture-tested only).
+- An independent review found that default sound followed channel position, so reordering or closing the first channel changed audio and reloaded Kick embeds. Sound is now set once per session. Re-checked with five live channels: moving the first channel to last with the grip's arrow keys left every channel's sound unchanged, kept all five iframe elements, and made one status request (the scheduled poll) instead of one per channel per move. Export and Clear workspace are enabled in live sessions, the add field is labelled Add channels, and Help lists only live shortcuts. Other review fixes (status polling by membership with a refresh on return, a reset of sound and states for new sessions, the Undo limit, Kick unverified status, matching preview and routing, a guard for Twitch moving an embed to another channel, and shared Move controls) are covered by tests and code review, not all by browser checks. `npm run check` passes with 235 tests.
+
 ## Real playback and in-flow drawers — 2026-10-20
 
 - The deployed redesign (`996a124`) was played with real Twitch VODs `2905358828` (summit1g, source) and `2905237691` (HasanAbi) in the desktop app's built-in browser. The group start was confirmed, both players held their mapped offsets, and watch mode and the timeline toggle kept both iframes without reloads.

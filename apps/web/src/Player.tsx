@@ -1,7 +1,5 @@
 import { useEffect, useRef, useState, type DragEventHandler } from 'react';
 import {
-  ArrowLeft,
-  ArrowRight,
   ArrowUpRight,
   GripVertical,
   LoaderCircle,
@@ -24,12 +22,13 @@ import {
 import { DRIFT_LIMIT } from './syncSummary';
 import { clock as wallClock, formatDelta } from './timeFormat';
 import { TimingControls } from './TimingControls';
-import { PlatformMark } from './ui';
+import { MoveControls, PlatformMark, gripPosition } from './ui';
 import { createPlayerClock } from './playerClock';
 import { createVodGuard, type PlaybackSnapshot, type StopReason } from './playback';
 import { createSeekPreparation, seekPosition, type SeekState } from './seekBarrier';
 import { supportsPlayback } from './capabilities';
 import { createKickPlayer } from './kickPlayer';
+import { loadTwitchSdk as loadSdk, type TwitchEmbed } from './twitchSdk';
 import type { GridPosition } from './gridLayout';
 
 // Player messages can be long; the header shows a short label that opens the full text.
@@ -52,58 +51,7 @@ export type PlayerHandle = {
   play(): void;
   setMuted(muted: boolean): void;
 };
-type TwitchPlayer = Omit<PlayerHandle, 'getSnapshot'> & {
-  getDuration(): number;
-  getVideo(): string;
-  getEnded(): boolean;
-  getPlaybackStats(): { bufferSize?: number } | null;
-  addEventListener(event: string, callback: (event?: unknown) => void): void;
-  removeEventListener(event: string, callback: (event?: unknown) => void): void;
-};
-type TwitchConstructor = {
-  new (element: HTMLElement, options: object): TwitchPlayer;
-  READY: string;
-  PLAYBACK_BLOCKED: string;
-  PLAYING: string;
-  PLAY: string;
-  SEEK: string;
-  ENDED: string;
-};
-declare global {
-  interface Window {
-    Twitch?: { Player: TwitchConstructor };
-  }
-}
-let sdk: Promise<TwitchConstructor> | undefined;
-function loadSdk() {
-  if (window.Twitch) return Promise.resolve(window.Twitch.Player);
-  if (!sdk)
-    sdk = new Promise<TwitchConstructor>((resolve, reject) => {
-      const script = document.createElement('script');
-      script.src = 'https://player.twitch.tv/js/embed/v1.js';
-      const timeout = window.setTimeout(() => {
-        script.remove();
-        sdk = undefined;
-        reject(new Error('Twitch player timed out. Retry or open the VOD directly.'));
-      }, 15000);
-      script.onload = () => {
-        clearTimeout(timeout);
-        if (window.Twitch) resolve(window.Twitch.Player);
-        else {
-          sdk = undefined;
-          reject(new Error('Twitch player is unavailable.'));
-        }
-      };
-      script.onerror = () => {
-        clearTimeout(timeout);
-        script.remove();
-        sdk = undefined;
-        reject(new Error('Twitch player was blocked. Check browser settings or open the VOD.'));
-      };
-      document.head.appendChild(script);
-    });
-  return sdk;
-}
+type TwitchPlayer = TwitchEmbed;
 export type SyncCommand = {
   moment: number;
   playing: boolean;
@@ -801,16 +749,7 @@ export function Player({
           onDragEnd={order.onEnd}
           onClick={(event) => toggleDrawer('move', event.currentTarget)}
           onKeyDown={(event) => {
-            const position =
-              event.key === 'Home'
-                ? 0
-                : event.key === 'End'
-                  ? order.count - 1
-                  : event.key === 'ArrowLeft' || event.key === 'ArrowUp'
-                    ? order.index - 1
-                    : event.key === 'ArrowRight' || event.key === 'ArrowDown'
-                      ? order.index + 1
-                      : null;
+            const position = gripPosition(event.key, order.index, order.count);
             if (position === null) return;
             event.preventDefault();
             order.onMove(position);
@@ -988,41 +927,13 @@ export function Player({
               />
             )}
             {drawer === 'move' && (
-              <div className="drawer-move">
-                <label>
-                  Position
-                  <select
-                    className="field"
-                    value={order.index}
-                    disabled={order.disabled}
-                    onChange={(event) => order.onMove(Number(event.target.value))}
-                  >
-                    {Array.from({ length: order.count }, (_, position) => (
-                      <option key={position} value={position}>
-                        {position + 1} of {order.count}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <button
-                  className="icon-btn"
-                  aria-label={`Move ${vod.channel} earlier`}
-                  title="Move earlier"
-                  disabled={order.disabled || order.index === 0}
-                  onClick={() => order.onMove(order.index - 1)}
-                >
-                  <ArrowLeft size={15} />
-                </button>
-                <button
-                  className="icon-btn"
-                  aria-label={`Move ${vod.channel} later`}
-                  title="Move later"
-                  disabled={order.disabled || order.index === order.count - 1}
-                  onClick={() => order.onMove(order.index + 1)}
-                >
-                  <ArrowRight size={15} />
-                </button>
-              </div>
+              <MoveControls
+                name={vod.channel}
+                index={order.index}
+                count={order.count}
+                disabled={order.disabled}
+                onMove={order.onMove}
+              />
             )}
             {drawer === 'error' && (
               <>

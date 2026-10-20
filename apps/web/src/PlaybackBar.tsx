@@ -30,6 +30,39 @@ export type BarStatus = {
   announce?: string;
 };
 
+// The bar's single status line: notices, progress, undo and summaries all land here.
+export function StatusSlot({ status }: { status: BarStatus }) {
+  return (
+    <>
+      {/* A stable live region: only the announcement text changes. */}
+      <span className="sr-only" role="status">
+        {status.announce}
+      </span>
+      <div className={`status-slot ${status.tone ?? 'muted'}`} title={status.title}>
+        {status.icon === 'spin' && <LoaderCircle className="spin" size={14} aria-hidden="true" />}
+        {status.icon === 'check' && <Check size={14} aria-hidden="true" />}
+        {status.icon === 'alert' && <TriangleAlert size={14} aria-hidden="true" />}
+        <span className="status-text">{status.text}</span>
+        {!!status.actions?.length && (
+          <span className="status-actions">
+            {status.actions.map((action) => (
+              <button
+                key={action.label}
+                className="icon-btn"
+                aria-label={action.label}
+                title={action.label}
+                onClick={action.onClick}
+              >
+                {action.icon}
+              </button>
+            ))}
+          </span>
+        )}
+      </div>
+    </>
+  );
+}
+
 export function PlaybackBar({
   vods,
   clips,
@@ -136,31 +169,7 @@ export function PlaybackBar({
           />
         </div>
         <span className="bar-divider" />
-        {/* A stable live region: only the announcement text changes. */}
-        <span className="sr-only" role="status">
-          {status.announce}
-        </span>
-        <div className={`status-slot ${status.tone ?? 'muted'}`} title={status.title}>
-          {status.icon === 'spin' && <LoaderCircle className="spin" size={14} aria-hidden="true" />}
-          {status.icon === 'check' && <Check size={14} aria-hidden="true" />}
-          {status.icon === 'alert' && <TriangleAlert size={14} aria-hidden="true" />}
-          <span className="status-text">{status.text}</span>
-          {!!status.actions?.length && (
-            <span className="status-actions">
-              {status.actions.map((action) => (
-                <button
-                  key={action.label}
-                  className="icon-btn"
-                  aria-label={action.label}
-                  title={action.label}
-                  onClick={action.onClick}
-                >
-                  {action.icon}
-                </button>
-              ))}
-            </span>
-          )}
-        </div>
+        <StatusSlot status={status} />
         <div className="bar-right">
           <Segmented
             label="Timeline zoom"

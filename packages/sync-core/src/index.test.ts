@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
+  channelUrl,
+  decodeLiveSession,
   decodeSession,
+  encodeLiveSession,
   encodeSession,
+  isLiveSession,
+  liveKey,
+  validateLiveSession,
   formatTime,
   formatGap,
   matchDescription,
@@ -12,6 +18,7 @@ import {
   parseTime,
   validateSession,
   validateVod,
+  type LiveSession,
   type Session,
   type Vod,
 } from './index';
@@ -262,5 +269,58 @@ describe('untrusted saved sessions', () => {
     expect(matchDescription(matchMoment(vod, Date.parse(vod.startedAt) + 7200000 + 7384000))).toBe(
       'No match — ended 2h 3m 4s before this moment',
     );
+  });
+});
+
+describe('live sessions', () => {
+  const live: LiveSession = {
+    version: 2,
+    kind: 'live',
+    channels: [
+      { platform: 'twitch', channel: 'summit1g', name: 'summit1g' },
+      { platform: 'kick', channel: 'xqc', name: 'xQc' },
+    ],
+  };
+  it('round-trips through a shared link', () =>
+    expect(decodeLiveSession(encodeLiveSession(live))).toEqual(live));
+  it('normalizes channels and strips extra fields', () => {
+    const parsed = validateLiveSession({
+      ...live,
+      token: 'secret',
+      channels: [{ platform: 'twitch', channel: 'Summit1G', name: '  ', playbackUrl: 'x' }],
+    });
+    expect(parsed).toEqual({
+      version: 2,
+      kind: 'live',
+      channels: [{ platform: 'twitch', channel: 'summit1g', name: 'summit1g' }],
+    });
+    expect(JSON.stringify(parsed)).not.toMatch(/secret|playbackUrl/);
+  });
+  it('rejects unsafe or duplicate channels', () => {
+    for (const channel of ['../x', 'a/b', 'videos', 'x'.repeat(26), ''])
+      expect(() =>
+        validateLiveSession({ ...live, channels: [{ platform: 'twitch', channel, name: 'x' }] }),
+      ).toThrow();
+    expect(() =>
+      validateLiveSession({
+        ...live,
+        channels: [{ platform: 'youtube', channel: 'x', name: 'x' }],
+      }),
+    ).toThrow();
+    expect(() =>
+      validateLiveSession({ ...live, channels: [live.channels[0], { ...live.channels[0] }] }),
+    ).toThrow('duplicate');
+    expect(() => validateLiveSession({ ...live, channels: [] })).toThrow();
+  });
+  it('keeps live and recording sessions apart', () => {
+    expect(isLiveSession(live)).toBe(true);
+    expect(isLiveSession(session)).toBe(false);
+    expect(() => validateSession(live)).toThrow();
+    expect(() => validateLiveSession(session)).toThrow();
+  });
+  it('builds channel keys and links', () => {
+    expect(liveKey(live.channels[1])).toBe('kick:xqc');
+    expect(channelUrl(live.channels[0])).toBe('https://www.twitch.tv/summit1g');
+    expect(channelUrl(live.channels[1])).toBe('https://kick.com/xqc');
   });
 });

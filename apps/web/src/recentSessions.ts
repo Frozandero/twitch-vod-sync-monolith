@@ -1,11 +1,24 @@
-import { validateSession, vodKey, type Session } from '@vodsync/core';
+import {
+  isLiveSession,
+  liveKey,
+  validateLiveSession,
+  validateSession,
+  vodKey,
+  type LiveSession,
+  type Session,
+} from '@vodsync/core';
 import { readStorage, writeStorage } from './storage';
 
 const KEY = 'vodsync.recent.v1';
 const LIMIT = 6;
-export type RecentSession = { savedAt: number; session: Session };
+export type RecentSession = { savedAt: number; session: Session | LiveSession };
 
-const keys = (session: Session) => new Set(session.vods.map(vodKey));
+const keys = (session: Session | LiveSession) =>
+  new Set(
+    'kind' in session
+      ? session.channels.map((channel) => `live:${liveKey(channel)}`)
+      : session.vods.map(vodKey),
+  );
 
 // Local history is untrusted like any other saved session: revalidate every entry.
 export function readRecent(raw = readStorage(KEY)): RecentSession[] {
@@ -18,7 +31,10 @@ export function readRecent(raw = readStorage(KEY)): RecentSession[] {
       try {
         const savedAt = Number(item?.savedAt);
         if (!Number.isFinite(savedAt)) continue;
-        recent.push({ savedAt, session: validateSession(item.session) });
+        const session = isLiveSession(item.session)
+          ? validateLiveSession(item.session)
+          : validateSession(item.session);
+        recent.push({ savedAt, session });
       } catch {
         /* Drop entries that no longer validate. */
       }
@@ -33,7 +49,7 @@ export function readRecent(raw = readStorage(KEY)): RecentSession[] {
 // dropped for a smaller one: opening one of their recordings alone starts a new entry.
 export function rememberSession(
   recent: RecentSession[],
-  session: Session,
+  session: Session | LiveSession,
   now = Date.now(),
 ): RecentSession[] {
   const current = keys(session);

@@ -316,8 +316,8 @@ export function validateSession(value: unknown): Session {
   const clips = validateClips(v.version === 2 ? v.clips : undefined, vods);
   return { version: 2, vods, leaderKey, momentMs, view: v.view, clips };
 }
-export function encodeSession(value: Session): string {
-  const bytes = new TextEncoder().encode(JSON.stringify(validateSession(value)));
+function encodeJson(value: unknown): string {
+  const bytes = new TextEncoder().encode(JSON.stringify(value));
   const encoded = btoa(Array.from(bytes, (n) => String.fromCharCode(n)).join(''))
     .replace(/\+/g, '-')
     .replace(/\//g, '_')
@@ -326,19 +326,74 @@ export function encodeSession(value: Session): string {
     throw new Error('This session is too large for a shared link. Export it as JSON instead.');
   return encoded;
 }
+function decodeJson(value: string): unknown {
+  return JSON.parse(
+    new TextDecoder().decode(
+      Uint8Array.from(atob(value.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0)),
+    ),
+  );
+}
+export function encodeSession(value: Session): string {
+  return encodeJson(validateSession(value));
+}
 export function decodeSession(value: string): Session {
   if (value.length > 60000) throw new Error('Shared session is too large.');
   try {
-    return validateSession(
-      JSON.parse(
-        new TextDecoder().decode(
-          Uint8Array.from(atob(value.replace(/-/g, '+').replace(/_/g, '/')), (c) =>
-            c.charCodeAt(0),
-          ),
-        ),
-      ),
-    );
+    return validateSession(decodeJson(value));
   } catch {
     throw new Error('This shared session is invalid or uses an unsupported version.');
+  }
+}
+
+// Live channels play at their own live edge. They have no shared timeline, so a live
+// session is a separate workspace: an ordered list of channels and nothing else.
+export type LiveChannel = { platform: Platform; channel: string; name: string };
+export type LiveSession = { version: 2; kind: 'live'; channels: LiveChannel[] };
+export const liveKey = (channel: Pick<LiveChannel, 'platform' | 'channel'>) =>
+  `${channel.platform}:${channel.channel}`;
+export function channelUrl(channel: Pick<LiveChannel, 'platform' | 'channel'>): string {
+  return channel.platform === 'twitch'
+    ? `https://www.twitch.tv/${channel.channel}`
+    : `https://kick.com/${channel.channel}`;
+}
+export function validateLiveChannel(input: unknown): LiveChannel {
+  if (!input || typeof input !== 'object') throw new Error('Invalid live channel.');
+  const c = input as LiveChannel;
+  const target =
+    typeof c.platform === 'string' && typeof c.channel === 'string'
+      ? parseChannelTarget(`${c.platform}/${c.channel}`)
+      : undefined;
+  if (!target || target.platform !== c.platform || target.channel !== c.channel.toLowerCase())
+    throw new Error('Invalid live channel.');
+  const name = typeof c.name === 'string' ? c.name.trim().slice(0, 100) : '';
+  return { platform: target.platform, channel: target.channel, name: name || target.channel };
+}
+export function validateLiveSession(value: unknown): LiveSession {
+  if (!value || typeof value !== 'object') throw new Error('Invalid session.');
+  const v = value as LiveSession;
+  if (
+    v.version !== 2 ||
+    v.kind !== 'live' ||
+    !Array.isArray(v.channels) ||
+    !v.channels.length ||
+    v.channels.length > MAX_VODS
+  )
+    throw new Error('Live session is empty, unsupported, or too large.');
+  const channels = v.channels.map(validateLiveChannel);
+  if (new Set(channels.map(liveKey)).size !== channels.length)
+    throw new Error('Live session contains duplicate channels.');
+  return { version: 2, kind: 'live', channels };
+}
+export const isLiveSession = (value: unknown): boolean =>
+  !!value && typeof value === 'object' && (value as { kind?: unknown }).kind === 'live';
+export function encodeLiveSession(value: LiveSession): string {
+  return encodeJson(validateLiveSession(value));
+}
+export function decodeLiveSession(value: string): LiveSession {
+  if (value.length > 60000) throw new Error('Shared session is too large.');
+  try {
+    return validateLiveSession(decodeJson(value));
+  } catch {
+    throw new Error('This shared live session is invalid or uses an unsupported version.');
   }
 }
