@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import {
-  ArrowLeft,
-  ArrowRight,
+  ArrowUpRight,
   Check,
   LoaderCircle,
   Maximize2,
@@ -51,7 +50,7 @@ import { overlapRange, viewRange } from './timelineScale';
 import { clock, formatDelta, formatSpan } from './timeFormat';
 import { readRecent, rememberSession, writeRecent, type RecentSession } from './recentSessions';
 import { StartScreen, splitInputs } from './StartScreen';
-import { BrandMark, Kbd, Menu, PlatformMark, claimsKey } from './ui';
+import { BrandMark, Kbd, PlatformMark, claimsKey } from './ui';
 
 const SESSION_KEY = 'vodsync.session.v1'; // Preserve and migrate existing workspaces.
 const TIMELINE_KEY = 'vodsync.timelineCollapsed';
@@ -76,7 +75,21 @@ function mergeClips(current: ClipMarker[], added: ClipMarker[]) {
   const known = new Set(current.map((clip) => `${clip.platform}:${clip.id}`));
   return [...current, ...added.filter((clip) => !known.has(`${clip.platform}:${clip.id}`))];
 }
-function Modal({
+const REPO_URL = 'https://github.com/Frozandero/twitch-vod-sync-monolith';
+const SHORTCUTS: [string[], string][] = [
+  [['Space'], 'Play or pause'],
+  [['J', 'L'], '±10 s'],
+  [['←', '→'], '±5 s'],
+  [['S'], 'Resync'],
+  [['T'], 'Timeline'],
+  [['F'], 'Watch mode'],
+  [['/'], 'Add'],
+  [['⌘Z'], 'Undo close'],
+];
+
+// Panels open as compact rows below the top bar. Twitch pauses an embed that anything covers
+// or that is pushed mostly out of view, so nothing here may float or grow tall.
+function Panel({
   title,
   close,
   children,
@@ -85,35 +98,31 @@ function Modal({
   close: () => void;
   children: ReactNode;
 }) {
-  const dialog = useRef<HTMLDialogElement>(null);
+  const node = useRef<HTMLElement>(null);
   useEffect(() => {
-    const el = dialog.current!;
     const previous = document.activeElement as HTMLElement | null;
-    el.showModal();
-    return () => {
-      el.close();
-      previous?.focus();
-    };
+    node.current
+      ?.querySelector<HTMLElement>('input, button:not(.panel-close), a[href]')
+      ?.focus({ preventScroll: true });
+    return () => previous?.focus({ preventScroll: true });
   }, []);
   return (
-    <dialog
-      ref={dialog}
-      onCancel={close}
-      onClick={(e) => {
-        if (e.target === dialog.current) close();
+    <section
+      ref={node}
+      className="top-panel"
+      aria-labelledby="panel-title"
+      onKeyDown={(event) => {
+        if (event.key !== 'Escape') return;
+        event.preventDefault();
+        close();
       }}
-      aria-label={title}
     >
-      <div className="modal-content">
-        <div className="modal-heading">
-          <h2>{title}</h2>
-          <button className="icon-btn" aria-label="Close dialog" onClick={close}>
-            <X size={17} />
-          </button>
-        </div>
-        {children}
-      </div>
-    </dialog>
+      <h2 id="panel-title">{title}</h2>
+      <div className="panel-body">{children}</div>
+      <button className="icon-btn small panel-close" aria-label={`Close ${title}`} onClick={close}>
+        <X size={14} />
+      </button>
+    </section>
   );
 }
 
@@ -133,7 +142,6 @@ export default function App() {
   const [notice, setNotice] = useState(initial.error || '');
   const [flash, setFlash] = useState('');
   const [modal, setModal] = useState<'settings' | 'help' | null>(null);
-  const [arranging, setArranging] = useState(false);
   const [draggingKey, setDraggingKey] = useState('');
   const [dropKey, setDropKey] = useState('');
   const [orderAnnouncement, setOrderAnnouncement] = useState('');
@@ -156,6 +164,7 @@ export default function App() {
   const [recent, setRecent] = useState<RecentSession[]>(() => readRecent());
   const [menuOpen, setMenuOpen] = useState(false);
   const menuButton = useRef<HTMLButtonElement>(null);
+  const resultsNode = useRef<HTMLDivElement>(null);
   const addField = useRef<HTMLTextAreaElement>(null);
   const startField = useRef<HTMLTextAreaElement>(null);
   const addForm = useRef<HTMLDivElement>(null);
@@ -314,7 +323,9 @@ export default function App() {
   useEffect(() => {
     if (!resultsOpen) return;
     const away = (event: PointerEvent) => {
-      if (!addForm.current?.contains(event.target as Node)) setResultsOpen(false);
+      const target = event.target as Node;
+      if (!addForm.current?.contains(target) && !resultsNode.current?.contains(target))
+        setResultsOpen(false);
     };
     // Clicking into a player iframe blurs the window rather than reaching the document.
     const blur = () => setResultsOpen(false);
@@ -596,7 +607,6 @@ export default function App() {
     setVods([]);
     setClips([]);
     setRemoved(undefined);
-    setArranging(false);
     setDraggingKey('');
     setDropKey('');
     setPlaybackStates({});
@@ -690,15 +700,26 @@ export default function App() {
     if (source) syncFrom(source);
   }
 
+  function closeMenu() {
+    setMenuOpen(false);
+    menuButton.current?.focus({ preventScroll: true });
+  }
+  // Run a top-bar menu action; the row closes first so it never lingers.
+  function menuAction(run: () => void) {
+    return () => {
+      closeMenu();
+      run();
+    };
+  }
+
   // Shortcuts never take keys from fields, menus or focused controls that use them.
   const shortcuts = useRef<(event: KeyboardEvent) => void>(() => {});
   shortcuts.current = (event) => {
     if (event.defaultPrevented || event.altKey) return;
-    // An open dialog owns Escape and every other key.
-    if (document.querySelector('dialog[open]')) return;
     if (event.key === 'Escape') {
       if (resultsOpen) setResultsOpen(false);
-      else if (narrow && expanded) setTimeline(false);
+      else if (menuOpen) closeMenu();
+      else if (modal) setModal(null);
       else if (watchMode) setWatchMode(false);
       return;
     }
@@ -940,58 +961,6 @@ export default function App() {
                   <Kbd>/</Kbd>
                 )}
               </form>
-              {resultsOpen && !!resultRows.length && (
-                <div className="add-results" id="add-results" role="status">
-                  {resultRows.map((row) => (
-                    <div className={`add-row ${row.status}`} key={row.input}>
-                      <span className="add-icon" aria-hidden="true">
-                        {row.status === 'pending' ? (
-                          <LoaderCircle className="spin" size={14} />
-                        ) : row.status === 'added' ? (
-                          <Check size={14} />
-                        ) : row.status === 'existing' ? (
-                          '–'
-                        ) : (
-                          <X size={14} />
-                        )}
-                      </span>
-                      <span className="add-text">
-                        <span className="mono">{shortInput(row.input)}</span>
-                        {row.status === 'failed' && <span className="add-error">{row.error}</span>}
-                      </span>
-                      <span className="add-detail">
-                        {row.status === 'pending' && 'Looking up'}
-                        {(row.status === 'added' || row.status === 'existing') && (
-                          <>
-                            <PlatformMark platform={row.vod.platform} /> {row.vod.channel}
-                            {row.status === 'existing' ? (
-                              ' · already in session'
-                            ) : (
-                              <span className="mono"> {formatTime(row.offsetSeconds)}</span>
-                            )}
-                          </>
-                        )}
-                        {row.status === 'failed' && (
-                          <button
-                            className="text-btn"
-                            onClick={() => {
-                              // Failed inputs are already back in the field; select this one.
-                              const field = addField.current;
-                              setResultsOpen(false);
-                              if (!field) return;
-                              field.focus();
-                              const at = field.value.indexOf(row.input);
-                              if (at >= 0) field.setSelectionRange(at, at + row.input.length);
-                            }}
-                          >
-                            Edit
-                          </button>
-                        )}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              )}
             </div>
           </>
         )}
@@ -1035,42 +1004,195 @@ export default function App() {
             ref={menuButton}
             className="icon-btn"
             aria-label="More options"
-            aria-haspopup="menu"
             aria-expanded={menuOpen}
+            aria-controls={menuOpen ? 'top-menu' : undefined}
             onClick={() => setMenuOpen((open) => !open)}
           >
             <MoreHorizontal size={18} />
           </button>
-          <Menu
-            anchor={menuButton}
-            open={menuOpen}
-            onClose={() => setMenuOpen(false)}
-            label="More options"
-            items={[
-              {
-                label: 'Import session',
-                onSelect: () => importInput.current?.click(),
-                disabled: busy,
-              },
-              { label: 'Export session', onSelect: exportSession, disabled: !vods.length },
-              { label: 'Twitch connection', onSelect: () => setModal('settings') },
-              { label: 'Help and shortcuts', onSelect: () => setModal('help') },
-              {
-                label: 'GitHub',
-                onSelect: () => {},
-                href: 'https://github.com/Frozandero/twitch-vod-sync-monolith',
-              },
-              'separator',
-              {
-                label: 'Clear workspace',
-                onSelect: () => clearWorkspace(),
-                disabled: busy || !vods.length,
-                danger: true,
-              },
-            ]}
-          />
         </div>
       </header>
+      {menuOpen && (
+        <nav
+          className="top-menu"
+          id="top-menu"
+          aria-label="More options"
+          onKeyDown={(event) => {
+            if (event.key !== 'Escape') return;
+            event.preventDefault();
+            closeMenu();
+          }}
+        >
+          <div className="drawer-body">
+            <button
+              className="drawer-btn"
+              disabled={busy}
+              onClick={menuAction(() => importInput.current?.click())}
+            >
+              Import session
+            </button>
+            <button
+              className="drawer-btn"
+              disabled={!vods.length}
+              onClick={menuAction(exportSession)}
+            >
+              Export session
+            </button>
+            <button className="drawer-btn" onClick={menuAction(() => setModal('settings'))}>
+              Twitch connection
+            </button>
+            <button className="drawer-btn" onClick={menuAction(() => setModal('help'))}>
+              Help and shortcuts
+            </button>
+            <a
+              className="drawer-btn"
+              href={REPO_URL}
+              target="_blank"
+              rel="noreferrer"
+              onClick={closeMenu}
+            >
+              GitHub
+            </a>
+            <button
+              className="drawer-btn danger"
+              disabled={busy || !vods.length}
+              onClick={menuAction(() => clearWorkspace())}
+            >
+              Clear workspace
+            </button>
+          </div>
+          <button className="icon-btn small" aria-label="Close more options" onClick={closeMenu}>
+            <X size={14} />
+          </button>
+        </nav>
+      )}
+      {resultsOpen && !!resultRows.length && (
+        <div className="add-results" id="add-results" role="status" ref={resultsNode}>
+          {resultRows.map((row) => (
+            <div className={`add-row ${row.status}`} key={row.input}>
+              <span className="add-icon" aria-hidden="true">
+                {row.status === 'pending' ? (
+                  <LoaderCircle className="spin" size={14} />
+                ) : row.status === 'added' ? (
+                  <Check size={14} />
+                ) : row.status === 'existing' ? (
+                  '–'
+                ) : (
+                  <X size={14} />
+                )}
+              </span>
+              <span className="add-text">
+                <span className="mono">{shortInput(row.input)}</span>
+                {row.status === 'failed' && <span className="add-error">{row.error}</span>}
+              </span>
+              <span className="add-detail">
+                {row.status === 'pending' && 'Looking up'}
+                {(row.status === 'added' || row.status === 'existing') && (
+                  <>
+                    <PlatformMark platform={row.vod.platform} /> {row.vod.channel}
+                    {row.status === 'existing' ? (
+                      ' · already in session'
+                    ) : (
+                      <span className="mono"> {formatTime(row.offsetSeconds)}</span>
+                    )}
+                  </>
+                )}
+                {row.status === 'failed' && (
+                  <button
+                    className="text-btn"
+                    onClick={() => {
+                      // Failed inputs are already back in the field; select this one.
+                      const field = addField.current;
+                      setResultsOpen(false);
+                      if (!field) return;
+                      field.focus();
+                      const at = field.value.indexOf(row.input);
+                      if (at >= 0) field.setSelectionRange(at, at + row.input.length);
+                    }}
+                  >
+                    Edit
+                  </button>
+                )}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+      {modal === 'settings' && (
+        <Panel title="Twitch connection" close={() => setModal(null)}>
+          {auth ? (
+            <>
+              <span>Connected</span>
+              <button
+                className="outline-btn"
+                onClick={() => {
+                  disconnect();
+                  setAuth(undefined);
+                }}
+              >
+                Disconnect
+              </button>
+            </>
+          ) : (
+            <>
+              <label className="panel-field">
+                Client ID
+                <input
+                  className="field"
+                  value={clientId}
+                  onChange={(e) => setClientId(e.target.value)}
+                  placeholder="Twitch application Client ID"
+                  autoComplete="off"
+                />
+              </label>
+              <button
+                className="outline-btn"
+                onClick={() => {
+                  try {
+                    writeStorage('vodsync.clientId', clientId);
+                    beginLogin(clientId);
+                  } catch (error) {
+                    setNotice(messageOf(error));
+                    setModal(null);
+                  }
+                }}
+              >
+                Connect
+              </button>
+              <span className="panel-note">
+                Redirect URL <code>{redirectUri()}</code>
+              </span>
+              <a
+                className="panel-link"
+                href={`${REPO_URL}#optional-official-twitch-connection`}
+                target="_blank"
+                rel="noreferrer"
+              >
+                Setup <ArrowUpRight size={14} />
+              </a>
+            </>
+          )}
+        </Panel>
+      )}
+      {modal === 'help' && (
+        <Panel title="Shortcuts" close={() => setModal(null)}>
+          <dl className="shortcuts">
+            {SHORTCUTS.map(([keys, label]) => (
+              <div key={label}>
+                <dt>
+                  {keys.map((key) => (
+                    <Kbd key={key}>{key}</Kbd>
+                  ))}
+                </dt>
+                <dd>{label}</dd>
+              </div>
+            ))}
+          </dl>
+          <a className="panel-link" href={`${REPO_URL}#use`} target="_blank" rel="noreferrer">
+            Guide <ArrowUpRight size={14} />
+          </a>
+        </Panel>
+      )}
       <input
         className="sr-only"
         ref={importInput}
@@ -1202,7 +1324,6 @@ export default function App() {
                       setDropKey('');
                     },
                     onMove: (index) => reorder(vodKey(vod), index),
-                    onArrange: () => setArranging(true),
                   }}
                   onRemove={() => remove(vod)}
                 />
@@ -1230,182 +1351,13 @@ export default function App() {
           onExpanded={setTimeline}
           watchMode={watchMode}
           onExitWatch={() => setWatchMode(false)}
-          sheet={narrow}
+
           status={barStatus()}
           leaderKey={leaderKey}
           playbackStates={playbackStates}
           onSeek={seekShared}
           onRemove={remove}
         />
-      )}
-      {arranging && (
-        <Modal title="Arrange recordings" close={() => setArranging(false)}>
-          <div className="order-list">
-            {vods.map((vod, index) => (
-              <div className="order-row" key={vodKey(vod)}>
-                <PlatformMark platform={vod.platform} />
-                <span title={vod.title}>{vod.channel}</span>
-                <select
-                  className="field"
-                  aria-label={`Grid position for ${vod.channel}`}
-                  value={index}
-                  disabled={busy}
-                  onChange={(event) => reorder(vodKey(vod), Number(event.target.value))}
-                >
-                  {vods.map((item, position) => (
-                    <option key={vodKey(item)} value={position}>
-                      {position + 1} of {vods.length}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  className="icon-btn"
-                  aria-label={`Move ${vod.channel} earlier`}
-                  title="Move earlier"
-                  disabled={busy || index === 0}
-                  onClick={() => reorder(vodKey(vod), index - 1)}
-                >
-                  <ArrowLeft size={16} />
-                </button>
-                <button
-                  className="icon-btn"
-                  aria-label={`Move ${vod.channel} later`}
-                  title="Move later"
-                  disabled={busy || index === vods.length - 1}
-                  onClick={() => reorder(vodKey(vod), index + 1)}
-                >
-                  <ArrowRight size={16} />
-                </button>
-              </div>
-            ))}
-          </div>
-        </Modal>
-      )}
-      {modal === 'settings' && (
-        <Modal title="Twitch connection" close={() => setModal(null)}>
-          <div className="form-stack">
-            <p>
-              Public lookup is used by default. Connect a registered Twitch application to use the
-              official API instead.
-            </p>
-            {auth ? (
-              <>
-                <p>Connected to Twitch.</p>
-                <button
-                  className="outline-btn"
-                  onClick={() => {
-                    disconnect();
-                    setAuth(undefined);
-                  }}
-                >
-                  Disconnect
-                </button>
-              </>
-            ) : (
-              <>
-                <label>
-                  Public Client ID
-                  <input
-                    className="field"
-                    value={clientId}
-                    onChange={(e) => setClientId(e.target.value)}
-                    placeholder="Twitch application Client ID"
-                    autoComplete="off"
-                  />
-                </label>
-                <p>
-                  Register an app in the{' '}
-                  <a href="https://dev.twitch.tv/console/apps" target="_blank" rel="noreferrer">
-                    Twitch developer console
-                  </a>{' '}
-                  with this redirect URL:
-                </p>
-                <code>{redirectUri()}</code>
-                <small>
-                  No client secret. Credentials stay in this tab and are excluded from shared
-                  sessions.
-                </small>
-                <button
-                  className="primary-btn"
-                  onClick={() => {
-                    try {
-                      writeStorage('vodsync.clientId', clientId);
-                      beginLogin(clientId);
-                    } catch (error) {
-                      setNotice(messageOf(error));
-                      setModal(null);
-                    }
-                  }}
-                >
-                  Connect Twitch
-                </button>
-              </>
-            )}
-          </div>
-        </Modal>
-      )}
-      {modal === 'help' && (
-        <Modal title="Using VOD Sync" close={() => setModal(null)}>
-          <div className="help-content">
-            <p>
-              Paste Twitch or Kick VOD or clip links, timestamped links, or Twitch IDs. The first
-              recording sets the moment; a timestamped link or clip selects that moment in its
-              parent VOD. Add <code>twitch/name</code> or <code>kick/name</code> to find that
-              streamer’s past broadcast covering the selected moment.
-            </p>
-            <p>
-              Each player’s sync button moves everyone to its moment. The source supplies the clock
-              and the audio; “Listen to … only” in a player’s menu switches the audio. Use Timing in
-              the same menu to jump to a timestamp or nudge a fixed delay.
-            </p>
-            <p>
-              The playback bar plays and pauses everyone, shows the selected moment, and reports
-              whether players are in sync. The timeline below it covers every recording; drag it to
-              seek, or zoom to the part every recording covers. Thin blue lines mark the selected
-              moment; thicker markers show each player’s verified position. Diamonds mark clips.
-            </p>
-            <dl className="shortcuts">
-              <dt>
-                <Kbd>Space</Kbd>
-              </dt>
-              <dd>Play or pause everyone</dd>
-              <dt>
-                <Kbd>J</Kbd> <Kbd>L</Kbd>
-              </dt>
-              <dd>Back or forward 10 seconds</dd>
-              <dt>
-                <Kbd>←</Kbd> <Kbd>→</Kbd>
-              </dt>
-              <dd>Back or forward 5 seconds</dd>
-              <dt>
-                <Kbd>S</Kbd>
-              </dt>
-              <dd>Resync everyone to the source</dd>
-              <dt>
-                <Kbd>T</Kbd>
-              </dt>
-              <dd>Show or hide the timeline</dd>
-              <dt>
-                <Kbd>F</Kbd> <Kbd>Esc</Kbd>
-              </dt>
-              <dd>Enter or leave watch mode</dd>
-              <dt>
-                <Kbd>/</Kbd>
-              </dt>
-              <dd>Add recordings</dd>
-              <dt>
-                <Kbd>⌘Z</Kbd>
-              </dt>
-              <dd>Undo closing a recording</dd>
-            </dl>
-            <p>
-              Ads, buffering and stream delays can shift playback, so sync again when needed.
-              Finished players are unloaded so Twitch can’t autoplay another VOD; seek earlier to
-              bring them back. Twitch players need at least 400 × 300 pixels. Kick VODs play here
-              when Kick returns a public playlist; otherwise use the timestamp link.
-            </p>
-          </div>
-        </Modal>
       )}
     </div>
   );

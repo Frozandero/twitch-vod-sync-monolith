@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState, type DragEventHandler } from 'react';
 import {
+  ArrowLeft,
+  ArrowRight,
   ArrowUpRight,
   GripVertical,
   LoaderCircle,
@@ -8,6 +10,7 @@ import {
   RotateCw,
   Volume2,
   VolumeX,
+  X,
 } from 'lucide-react';
 import {
   formatTime,
@@ -20,8 +23,14 @@ import {
 } from '@vodsync/core';
 import { DRIFT_LIMIT } from './syncSummary';
 import { clock as wallClock, formatDelta } from './timeFormat';
-import { TimingPanel } from './TimingPanel';
-import { Menu, PlatformMark, Popover } from './ui';
+import { TimingControls } from './TimingPanel';
+import { PlatformMark } from './ui';
+import { createPlayerClock } from './playerClock';
+import { createVodGuard, type PlaybackSnapshot, type StopReason } from './playback';
+import { createSeekPreparation, seekPosition, type SeekState } from './seekBarrier';
+import { supportsPlayback } from './capabilities';
+import { createKickPlayer } from './kickPlayer';
+import type { GridPosition } from './gridLayout';
 
 // Player messages can be long; the header shows a short label that opens the full text.
 function shortError(message: string) {
@@ -32,12 +41,7 @@ function shortError(message: string) {
   if (/not ready to seek/i.test(message)) return 'not ready';
   return 'player problem';
 }
-import { createPlayerClock } from './playerClock';
-import { createVodGuard, type PlaybackSnapshot, type StopReason } from './playback';
-import { createSeekPreparation, seekPosition, type SeekState } from './seekBarrier';
-import { supportsPlayback } from './capabilities';
-import { createKickPlayer } from './kickPlayer';
-import type { GridPosition } from './gridLayout';
+type Drawer = 'menu' | 'timing' | 'move' | 'error';
 
 export type PlayerHandle = {
   getSnapshot(): PlaybackSnapshot;
@@ -143,7 +147,6 @@ type Props = {
     onOver: DragEventHandler<HTMLElement>;
     onDrop: DragEventHandler<HTMLElement>;
     onMove: (index: number) => void;
-    onArrange: () => void;
   };
 };
 export function Player({
@@ -169,11 +172,10 @@ export function Player({
   onCopy,
   order,
 }: Props) {
-  const moreButton = useRef<HTMLButtonElement>(null);
-  const errorButton = useRef<HTMLButtonElement>(null);
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [timingOpen, setTimingOpen] = useState(false);
-  const [errorOpen, setErrorOpen] = useState(false);
+  const gripButton = useRef<HTMLButtonElement>(null);
+  const drawerNode = useRef<HTMLDivElement>(null);
+  const drawerTrigger = useRef<HTMLElement | null>(null);
+  const [drawer, setDrawer] = useState<Drawer | null>(null);
   const container = useRef<HTMLDivElement>(null);
   const player = useRef<Omit<PlayerHandle, 'getSnapshot'> | null>(null);
   const clock = useRef<ReturnType<typeof createPlayerClock> | null>(null);
@@ -191,9 +193,25 @@ export function Player({
     [muted, setMuted] = useState(true),
     [current, setCurrent] = useState(0),
     [attempt, setAttempt] = useState(0);
+  const drawerId = `drawer-${vod.platform}-${vod.id}`;
+  function toggleDrawer(kind: Drawer, trigger: HTMLElement) {
+    drawerTrigger.current = trigger;
+    setDrawer((open) => (open === kind || (kind === 'menu' && open === 'timing') ? null : kind));
+  }
+  function closeDrawer() {
+    setDrawer(null);
+    requestAnimationFrame(() => drawerTrigger.current?.focus({ preventScroll: true }));
+  }
+  // Move focus into a drawer as it opens or changes view.
+  useEffect(() => {
+    if (!drawer || drawer === 'timing') return;
+    drawerNode.current
+      ?.querySelector<HTMLElement>('button:not(:disabled), select, input')
+      ?.focus({ preventScroll: true });
+  }, [drawer]);
   // A resolved error closes its details so the next one never opens unprompted.
   useEffect(() => {
-    if (!error) setErrorOpen(false);
+    if (!error) setDrawer((open) => (open === 'error' ? null : open));
   }, [error]);
   const key = vodKey(vod),
     demo = vod.provenance === 'demo';
@@ -759,15 +777,17 @@ export function Player({
     >
       <div className="tile-head">
         <button
+          ref={gripButton}
           className="icon-btn reorder-handle"
           aria-label={`Reorder ${vod.channel}, position ${order.index + 1} of ${order.count}`}
-          aria-haspopup="dialog"
-          title="Drag to reorder, or click to arrange. Arrow keys move; Home/End move to first/last."
+          aria-expanded={drawer === 'move'}
+          aria-controls={drawer ? drawerId : undefined}
+          title="Drag to reorder, or click to choose a position. Arrow keys move; Home/End move to first/last."
           disabled={order.disabled}
           draggable={!order.disabled}
           onDragStart={order.onStart}
           onDragEnd={order.onEnd}
-          onClick={order.onArrange}
+          onClick={(event) => toggleDrawer('move', event.currentTarget)}
           onKeyDown={(event) => {
             const position =
               event.key === 'Home'
@@ -802,13 +822,12 @@ export function Player({
         </span>
         {status?.detail ? (
           <button
-            ref={errorButton}
             type="button"
             className={`tile-status ${status.tone}`}
-            aria-haspopup="dialog"
-            aria-expanded={errorOpen}
+            aria-expanded={drawer === 'error'}
+            aria-controls={drawer ? drawerId : undefined}
             aria-label={`${vod.channel}: ${error}`}
-            onClick={() => setErrorOpen((open) => !open)}
+            onClick={(event) => toggleDrawer('error', event.currentTarget)}
           >
             <span>{status.text}</span>
           </button>
@@ -872,69 +891,148 @@ export function Player({
             </>
           )}
           <button
-            ref={moreButton}
-            className="icon-btn"
+            className={`icon-btn ${drawer === 'menu' || drawer === 'timing' ? 'on' : ''}`}
             aria-label={`More for ${vod.channel}`}
-            aria-haspopup="menu"
-            aria-expanded={menuOpen}
-            onClick={() => setMenuOpen((open) => !open)}
+            aria-expanded={drawer === 'menu' || drawer === 'timing'}
+            aria-controls={drawer ? drawerId : undefined}
+            onClick={(event) => toggleDrawer('menu', event.currentTarget)}
           >
             <MoreHorizontal size={16} />
           </button>
         </div>
       </div>
-      <Menu
-        anchor={moreButton}
-        open={menuOpen}
-        onClose={() => setMenuOpen(false)}
-        label={`${vod.channel} actions`}
-        items={[
-          // Recordings resolving in an add would overwrite timing changes, so wait.
-          { label: 'Timing', onSelect: () => setTimingOpen(true), disabled: busy },
-          {
-            label: `Listen to ${vod.channel} only`,
-            onSelect: onSolo,
-            disabled: external || !ready || soloed,
-          },
-          { label: 'Copy timestamp link', onSelect: () => onCopy(link) },
-          { label: 'Move to position', onSelect: order.onArrange, disabled: order.disabled },
-          'separator',
-          { label: `Close ${vod.channel}`, onSelect: onRemove, danger: true, disabled: busy },
-        ]}
-      />
-      <Popover
-        anchor={errorButton}
-        open={errorOpen && !!error}
-        onClose={() => setErrorOpen(false)}
-        label={`${vod.channel} problem`}
-        className="error-pop"
-      >
-        <p role="alert">{error}</p>
-        <button
-          type="button"
-          className="outline-btn"
-          onClick={() => {
-            setErrorOpen(false);
-            setError('');
-            setAttempt((n) => n + 1);
+      {/* The drawer pushes the video down instead of covering it: Twitch pauses covered embeds. */}
+      {drawer && (
+        <div
+          ref={drawerNode}
+          className="tile-drawer"
+          id={drawerId}
+          role="group"
+          aria-label={`${vod.channel} ${drawer === 'menu' ? 'actions' : drawer}`}
+          onKeyDown={(event) => {
+            if (event.key !== 'Escape') return;
+            event.preventDefault();
+            event.stopPropagation();
+            closeDrawer();
           }}
         >
-          <RotateCw size={13} aria-hidden="true" />
-          Reload player
-        </button>
-      </Popover>
-      <TimingPanel
-        anchor={moreButton}
-        open={timingOpen}
-        onClose={() => setTimingOpen(false)}
-        vod={vod}
-        moment={moment}
-        drift={drift}
-        source={source}
-        sourceName={sourceName}
-        onSeek={onSeekTo}
-        onCorrect={onCorrect}
-      />
+          <div className="drawer-body">
+            {drawer === 'menu' && (
+              <>
+                <button
+                  className="drawer-btn"
+                  disabled={busy}
+                  title={busy ? 'Wait for the recordings being added' : undefined}
+                  onClick={() => setDrawer('timing')}
+                >
+                  Timing
+                </button>
+                <button
+                  className="drawer-btn"
+                  disabled={external || !ready || soloed}
+                  onClick={() => {
+                    onSolo();
+                    closeDrawer();
+                  }}
+                >
+                  Listen to {vod.channel} only
+                </button>
+                <button
+                  className="drawer-btn"
+                  onClick={() => {
+                    onCopy(link);
+                    closeDrawer();
+                  }}
+                >
+                  Copy timestamp link
+                </button>
+                <button
+                  className="drawer-btn"
+                  disabled={order.disabled}
+                  onClick={() => setDrawer('move')}
+                >
+                  Move to position
+                </button>
+                <button className="drawer-btn danger" disabled={busy} onClick={onRemove}>
+                  Close {vod.channel}
+                </button>
+              </>
+            )}
+            {drawer === 'timing' && (
+              <TimingControls
+                vod={vod}
+                moment={moment}
+                drift={drift}
+                source={source}
+                sourceName={sourceName}
+                onSeek={onSeekTo}
+                onCorrect={onCorrect}
+                onDone={closeDrawer}
+              />
+            )}
+            {drawer === 'move' && (
+              <div className="drawer-move">
+                <label>
+                  Position
+                  <select
+                    className="field"
+                    value={order.index}
+                    disabled={order.disabled}
+                    onChange={(event) => order.onMove(Number(event.target.value))}
+                  >
+                    {Array.from({ length: order.count }, (_, position) => (
+                      <option key={position} value={position}>
+                        {position + 1} of {order.count}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <button
+                  className="icon-btn"
+                  aria-label={`Move ${vod.channel} earlier`}
+                  title="Move earlier"
+                  disabled={order.disabled || order.index === 0}
+                  onClick={() => order.onMove(order.index - 1)}
+                >
+                  <ArrowLeft size={15} />
+                </button>
+                <button
+                  className="icon-btn"
+                  aria-label={`Move ${vod.channel} later`}
+                  title="Move later"
+                  disabled={order.disabled || order.index === order.count - 1}
+                  onClick={() => order.onMove(order.index + 1)}
+                >
+                  <ArrowRight size={15} />
+                </button>
+              </div>
+            )}
+            {drawer === 'error' && (
+              <>
+                <p className="drawer-message">{error}</p>
+                <button
+                  className="drawer-btn"
+                  onClick={() => {
+                    closeDrawer();
+                    setError('');
+                    setAttempt((n) => n + 1);
+                  }}
+                >
+                  <RotateCw size={13} aria-hidden="true" />
+                  Reload player
+                </button>
+              </>
+            )}
+          </div>
+          <button
+            className="icon-btn small"
+            aria-label={`Close ${vod.channel} ${drawer === 'menu' ? 'actions' : drawer}`}
+            onClick={closeDrawer}
+          >
+            <X size={14} />
+          </button>
+        </div>
+      )}
       <div className="tile-frame">
         {external ? (
           <div className="frame-panel">

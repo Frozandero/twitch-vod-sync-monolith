@@ -282,84 +282,99 @@ code {
   color: var(--ink-muted);
 }
 
-/* Popovers and menus float above everything, never over media unless opened. */
-.popover {
-  position: fixed;
-  z-index: 40;
-  background: var(--surface-overlay);
-  color: var(--ink);
-  border-radius: 8px;
-  box-shadow: var(--shadow-overlay);
-}
-.menu {
-  min-width: 216px;
-  padding: 4px;
-}
-.menu-item {
+/* Drawers and panels sit in the page flow. Twitch pauses an embed that anything covers or
+   that is pushed mostly out of view, so these rows push content aside and stay short. */
+.tile-drawer,
+.top-menu {
   display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  background: var(--surface-raised);
+  border-bottom: 1px solid var(--line);
+}
+.tile-drawer {
+  flex: none;
+  padding: 6px 4px 6px 8px;
+}
+.drawer-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  width: 100%;
-  height: 34px;
+  gap: 4px 6px;
+}
+.drawer-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
   padding: 0 10px;
   border-radius: 4px;
   font-size: 13px;
   color: var(--ink);
-  text-align: left;
   text-decoration: none;
+  white-space: nowrap;
+  transition: background-color var(--fast);
 }
-.menu-item:hover:not(:disabled),
-.menu-item:focus-visible {
-  background: var(--surface-raised);
+.drawer-btn:hover:not(:disabled) {
+  background: var(--surface-sunken);
   color: var(--ink);
-  outline: none;
 }
-.menu-item.danger {
+.drawer-btn.danger {
   color: var(--signal);
 }
-.menu-separator {
-  height: 1px;
-  margin: 4px 0;
-  background: var(--line);
+.drawer-message {
+  flex-basis: 100%;
+  padding: 6px 4px 2px;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--ink-muted);
 }
-.pop-head {
+.drawer-move {
   display: flex;
   align-items: center;
-  height: 40px;
-  padding: 0 4px 0 12px;
-  border-bottom: 1px solid var(--line);
-}
-.pop-head h2 {
-  flex: 1;
+  gap: 6px;
   font-size: 13px;
-  font-weight: 500;
+  color: var(--ink-muted);
 }
-.timing {
-  width: 280px;
-}
-.timing-grid {
-  display: grid;
-  grid-template-columns: 52px minmax(0, 1fr);
+.drawer-move label {
+  display: inline-flex;
   align-items: center;
   gap: 8px;
-  padding: 12px;
+}
+.drawer-move select {
+  height: 32px;
+  padding: 0 8px;
+  color: var(--ink);
+}
+.timing {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 16px;
   font-size: 12px;
   color: var(--ink-muted);
 }
-.timing-row {
+.timing-group {
   display: flex;
   align-items: center;
   gap: 4px;
   margin: 0;
 }
-.timing-row .field {
-  flex: 1;
-  min-width: 0;
+.timing-group > label,
+.timing-group > span {
+  margin-right: 4px;
+}
+.timing .field {
+  width: 96px;
   height: 32px;
   padding: 0 8px;
   font-size: 13px;
   color: var(--ink);
+}
+.timing .offset-field {
+  width: 76px;
 }
 .step-btn {
   flex: none;
@@ -383,6 +398,84 @@ code {
 }
 .signal {
   color: var(--signal);
+}
+.top-menu {
+  flex: none;
+  padding: 6px 12px;
+}
+.top-menu .drawer-body {
+  justify-content: flex-end;
+}
+.top-panel {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px 16px;
+  min-height: 45px;
+  padding: 6px 12px 6px 16px;
+  background: var(--surface-raised);
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+  color: var(--ink-muted);
+}
+.top-panel h2 {
+  flex: none;
+  font-size: 13px;
+  line-height: 20px;
+  font-weight: 500;
+  color: var(--ink);
+}
+.panel-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 16px;
+}
+.panel-close {
+  flex: none;
+  align-self: flex-start;
+}
+.panel-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.panel-field .field {
+  width: 240px;
+  max-width: 100%;
+  height: 32px;
+  padding: 0 8px;
+  font-size: 13px;
+}
+.panel-note code {
+  margin-left: 6px;
+  font-size: 12px;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+.panel-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  text-decoration: none;
+}
+.shortcuts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 16px;
+}
+.shortcuts div {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.shortcuts dt {
+  display: flex;
+  gap: 4px;
 }
 
 /* App frame */
@@ -491,16 +584,12 @@ code {
   color: var(--ink-subtle);
 }
 .add-results {
-  position: absolute;
-  z-index: 30;
-  top: calc(100% + 6px);
-  left: 0;
-  right: 0;
-  max-height: min(360px, 60vh);
+  flex: none;
+  max-height: 172px;
   overflow: auto;
-  background: var(--surface-overlay);
-  border-radius: 8px;
-  box-shadow: var(--shadow-overlay);
+  padding: 2px 8px;
+  background: var(--surface-raised);
+  border-bottom: 1px solid var(--line);
 }
 .add-row {
   display: grid;
@@ -656,16 +745,6 @@ button.tile-status {
 }
 button.tile-status:hover {
   background: var(--surface-sunken);
-}
-.error-pop {
-  width: 280px;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 12px;
-  padding: 12px;
-  font-size: 13px;
-  line-height: 20px;
 }
 .tile-status.warning {
   color: var(--warning);
@@ -933,10 +1012,6 @@ button.tile-status:hover {
   --tl-clip-y: 20px;
   padding: 0 16px 14px;
 }
-.tl-sheet-head,
-.tl-scrim {
-  display: none;
-}
 .tl-head,
 .tl-row {
   display: grid;
@@ -1173,6 +1248,9 @@ button.tile-status:hover {
   background: var(--surface-sunken);
 }
 .watch-mode > .topbar,
+.watch-mode > .top-menu,
+.watch-mode > .top-panel,
+.watch-mode > .add-results,
 .watch-mode > .demo-banner {
   display: none;
 }
@@ -1220,110 +1298,6 @@ button.tile-status:hover {
 .watch-mode .clock-time {
   font-size: 15px;
   line-height: 20px;
-}
-
-/* Dialogs */
-dialog {
-  width: min(440px, calc(100vw - 32px));
-  max-height: 90dvh;
-  padding: 0;
-  color: var(--ink);
-  background: var(--surface-overlay);
-  border: 0;
-  border-radius: 12px;
-  box-shadow: var(--shadow-overlay);
-}
-dialog::backdrop {
-  background: var(--scrim);
-}
-.modal-content {
-  padding: 16px 20px 24px 24px;
-}
-.modal-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 16px;
-}
-.modal-heading h2 {
-  font-size: 18px;
-  line-height: 26px;
-  font-weight: 500;
-}
-.form-stack {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 16px;
-}
-.form-stack label {
-  align-self: stretch;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  font-weight: 500;
-}
-.form-stack p,
-.help-content p,
-.form-stack small {
-  font-size: 13px;
-  line-height: 20px;
-  color: var(--ink-muted);
-}
-.form-stack code {
-  align-self: stretch;
-  padding: 10px 12px;
-  font-size: 12px;
-  overflow-wrap: anywhere;
-  background: var(--surface-sunken);
-  border: 1px solid var(--line);
-  border-radius: 4px;
-}
-.help-content {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-.help-content code {
-  font-size: 12px;
-  color: var(--ink);
-}
-.shortcuts {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 8px 16px;
-  align-items: center;
-  font-size: 13px;
-}
-.shortcuts dt {
-  display: flex;
-  gap: 4px;
-}
-.shortcuts dd {
-  color: var(--ink-muted);
-}
-.order-list {
-  display: flex;
-  flex-direction: column;
-}
-.order-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  height: 48px;
-  border-bottom: 1px solid var(--line);
-}
-.order-row > span {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.order-row select {
-  height: 32px;
-  padding: 0 8px;
 }
 
 /* Start screen */
@@ -1520,7 +1494,7 @@ dialog::backdrop {
   }
 }
 
-/* Phones: stacked players, a sticky bar and the timeline as a bottom sheet. */
+/* Phones: stacked players with the playback bar and timeline below them in the page. */
 @media (max-width: 700px) {
   .topbar {
     gap: 8px;
@@ -1534,6 +1508,19 @@ dialog::backdrop {
   }
   .add-field textarea {
     font-size: 16px;
+  }
+  .top-menu .drawer-body {
+    justify-content: flex-start;
+  }
+  .top-panel {
+    flex-wrap: wrap;
+    justify-content: space-between;
+    padding: 6px 4px 10px 12px;
+  }
+  .top-panel .panel-body {
+    order: 3;
+    flex-basis: 100%;
+    padding-right: 8px;
   }
   .add-field .kbd,
   .inverse-btn span,
@@ -1588,15 +1575,6 @@ dialog::backdrop {
   .tile-status {
     max-width: 30%;
   }
-  /* The bar stays reachable while stacked players scroll beneath it. */
-  .playbar {
-    position: sticky;
-    bottom: 0;
-  }
-  /* The open sheet and its scrim must cover the top bar too. */
-  .playbar.expanded {
-    z-index: 20;
-  }
   .playbar-row {
     gap: 10px;
     padding: 10px 12px 12px;
@@ -1636,36 +1614,6 @@ dialog::backdrop {
     height: 44px;
     padding: 0 12px;
     border: 1px solid var(--line);
-  }
-  .playbar.expanded .timeline {
-    position: fixed;
-    z-index: 31;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    max-height: 75dvh;
-    overflow: auto;
-    padding: 0 16px 20px;
-    background: var(--surface-overlay);
-    border-radius: 12px 12px 0 0;
-    box-shadow: var(--shadow-overlay);
-  }
-  .playbar.expanded .tl-scrim {
-    display: block;
-    position: fixed;
-    z-index: 30;
-    inset: 0;
-    background: var(--scrim);
-  }
-  .tl-sheet-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    height: 52px;
-  }
-  .tl-sheet-head h2 {
-    font-size: 18px;
-    font-weight: 500;
   }
   .timeline {
     --tl-row: 66px;
