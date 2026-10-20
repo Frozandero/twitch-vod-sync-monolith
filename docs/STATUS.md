@@ -20,7 +20,9 @@ This file records actual checks and their limits. A passing build does not prove
   - Kick Roshtein and Classybeef (Slots & Casino) showed offline inside Kick's embed although the API reported them live; reloading did not help.
   - Two Twitch channels did not start when the session opened and needed a Play all press; such holds now show _press play_ after eight seconds.
   - The clipboard refused a synthetic Share click; a real click copied the link.
+  - During a Twitch pre-roll ad, loltyler1's tile read paused, and the scaled test view stopped repainting both Twitch frames; this was not investigated further.
   - Not verified: Kick embeds on physical phones, Safari, screen readers, sessions with many live channels, and the official Twitch connection's Helix stream lookup (fixture-tested only).
+- An independent review found that default sound followed channel position, so reordering or closing the first channel changed audio and reloaded Kick embeds. Sound is now set once per session. Re-checked with five live channels: moving the first channel to last with the grip's arrow keys left every channel's sound unchanged, kept all five iframe elements, and made one status request (the scheduled poll) instead of one per channel per move. Export and Clear workspace are enabled in live sessions, the add field is labelled Add channels, and Help lists only live shortcuts. Other review fixes (status polling by membership with a refresh on return, a reset of sound and states for new sessions, the Undo limit, Kick unverified status, matching preview and routing, a guard for Twitch moving an embed to another channel, and shared Move controls) are covered by tests and code review, not all by browser checks. `npm run check` passes with 235 tests.
 
 ## Real playback and in-flow drawers — 2026-10-20
 

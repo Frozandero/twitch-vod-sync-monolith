@@ -17,6 +17,9 @@ describe('live input routing', () => {
     expect(opensLive(['twitch/a'], 2, 0)).toBe(false);
     expect(opensLive(['https://www.twitch.tv/videos/1'], 0, 1)).toBe(true);
     expect(opensLive([], 0, 0)).toBe(false);
+    // A typo fails on its own row instead of sending the channels to the recording flow.
+    expect(opensLive(['twitch/a', 'nonsense!'], 0, 0)).toBe(true);
+    expect(opensLive(['nonsense!'], 0, 0)).toBe(false);
   });
   it('starts a session when one channel is live and lets offline ones wait', async () => {
     const result = await resolveLiveInputs(

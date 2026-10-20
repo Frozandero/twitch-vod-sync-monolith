@@ -169,7 +169,8 @@ export async function resolveLiveChannel(
       const stream = streams.data[0];
       return {
         channel: validateLiveChannel({ platform: 'twitch', channel, name: user.display_name }),
-        live: stream?.type === 'live' && String(stream.user_login).toLowerCase() === channel,
+        // Like the public lookup, any current stream of this channel counts as live.
+        live: !!stream && String(stream.user_login).toLowerCase() === channel,
       };
     }
     const data = await gql(
@@ -189,11 +190,7 @@ export async function resolveLiveChannel(
       error instanceof TypeError ||
       (error instanceof DOMException && ['TimeoutError', 'AbortError'].includes(error.name))
     )
-      throw new Error(
-        target.platform === 'kick'
-          ? 'Could not reach Kick. Retry in a moment.'
-          : 'Could not reach Twitch. Retry or connect Twitch in Settings.',
-      );
+      throw new Error('Could not reach Twitch. Retry or connect Twitch in Settings.');
     throw error;
   }
 }

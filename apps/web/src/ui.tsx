@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { ArrowLeft, ArrowRight } from 'lucide-react';
 import type { Platform } from '@vodsync/core';
 
 export function Kbd({ children }: { children: ReactNode }) {
@@ -78,4 +79,66 @@ export function claimsKey(target: EventTarget | null, key: string) {
   if (/^(Arrow|Home|End)/.test(key) && node.closest('input, .reorder-handle, .segmented'))
     return true;
   return false;
+}
+
+// Focused grips move a player: arrows step, Home/End jump. Other keys return null.
+export function gripPosition(key: string, index: number, count: number): number | null {
+  if (key === 'Home') return 0;
+  if (key === 'End') return count - 1;
+  if (key === 'ArrowLeft' || key === 'ArrowUp') return index - 1;
+  if (key === 'ArrowRight' || key === 'ArrowDown') return index + 1;
+  return null;
+}
+
+// The Move row inside a player's header drawer: a keyboard and touch alternative to dragging.
+export function MoveControls({
+  name,
+  index,
+  count,
+  disabled,
+  onMove,
+}: {
+  name: string;
+  index: number;
+  count: number;
+  disabled: boolean;
+  onMove: (index: number) => void;
+}) {
+  return (
+    <div className="drawer-move">
+      <label>
+        Position
+        <select
+          className="field"
+          value={index}
+          disabled={disabled}
+          onChange={(event) => onMove(Number(event.target.value))}
+        >
+          {Array.from({ length: count }, (_, position) => (
+            <option key={position} value={position}>
+              {position + 1} of {count}
+            </option>
+          ))}
+        </select>
+      </label>
+      <button
+        className="icon-btn"
+        aria-label={`Move ${name} earlier`}
+        title="Move earlier"
+        disabled={disabled || index === 0}
+        onClick={() => onMove(index - 1)}
+      >
+        <ArrowLeft size={15} />
+      </button>
+      <button
+        className="icon-btn"
+        aria-label={`Move ${name} later`}
+        title="Move later"
+        disabled={disabled || index === count - 1}
+        onClick={() => onMove(index + 1)}
+      >
+        <ArrowRight size={15} />
+      </button>
+    </div>
+  );
 }

@@ -85,6 +85,9 @@ function initialState(): { session?: Session; live?: LiveSession; error?: string
     return { error: messageOf(error) };
   }
 }
+// A new or loaded live session gives sound to its first channel only.
+const firstSound = (channels: LiveChannel[]): Record<string, boolean> =>
+  channels.length ? { [liveKey(channels[0])]: true } : {};
 const shortInput = (input: string) => input.replace(/^https?:\/\/(www\.|m\.)?/i, '');
 function mergeClips(current: ClipMarker[], added: ClipMarker[]) {
   const known = new Set(current.map((clip) => `${clip.platform}:${clip.id}`));
@@ -101,6 +104,9 @@ const SHORTCUTS: [string[], string][] = [
   [['/'], 'Add'],
   [['⌘Z'], 'Undo close'],
 ];
+
+// Live sessions have no clock to skip, resync or show on a timeline.
+const LIVE_SHORTCUTS = new Set(['Play or pause', 'Watch mode', 'Add', 'Undo close']);
 
 // Panels open as compact rows below the top bar. Twitch pauses an embed that anything covers
 // or that is pushed mostly out of view, so nothing here may float or grow tall.
@@ -148,8 +154,10 @@ export default function App() {
   // A live session replaces the recording workspace: channels at their own live edge.
   const [live, setLive] = useState<LiveChannel[]>(initial.live?.channels || []);
   const [livePlaying, setLivePlaying] = useState(false);
-  // Sound per channel; by default only the first channel is audible.
-  const [liveSound, setLiveSound] = useState<Record<string, boolean>>({});
+  // Sound per channel, set when a session starts; missing channels are muted.
+  const [liveSound, setLiveSound] = useState<Record<string, boolean>>(() =>
+    firstSound(initial.live?.channels || []),
+  );
   const [liveSolo, setLiveSolo] = useState('');
   const [liveStates, setLiveStates] = useState<Record<string, LiveState>>({});
   const [liveRemoved, setLiveRemoved] = useState<{
@@ -268,9 +276,7 @@ export default function App() {
   const liveSession = (): LiveSession =>
     validateLiveSession({ version: 2, kind: 'live', channels: live });
   const liveOnline = useLiveStatus(live, auth);
-  const mutedKeys = new Set(
-    live.filter((channel, i) => !(liveSound[liveKey(channel)] ?? i === 0)).map(liveKey),
-  );
+  const mutedKeys = new Set(live.filter((channel) => !liveSound[liveKey(channel)]).map(liveKey));
   const updateLiveState = useCallback((key: string, state: LiveState) => {
     setLiveStates((current) => (current[key] === state ? current : { ...current, [key]: state }));
   }, []);
@@ -311,7 +317,11 @@ export default function App() {
       writeStorage(LIVE_KEY, null);
       return;
     }
-    writeStorage(LIVE_KEY, JSON.stringify(liveSession()));
+    try {
+      writeStorage(LIVE_KEY, JSON.stringify(liveSession()));
+    } catch {
+      /* Transient state while changing channels. */
+    }
   }, [live]);
   // Keep a short local history of sessions; the newest state replaces older ones.
   function remember() {
@@ -562,6 +572,7 @@ export default function App() {
   function loadLive(next: LiveSession, play = false) {
     clearWorkspace(false);
     setLive(next.channels);
+    setLiveSound(firstSound(next.channels));
     setLivePlaying(play);
   }
   function loadSession(next: Session) {
@@ -603,6 +614,9 @@ export default function App() {
           // A new live session starts playing; the add was the user's gesture.
           setRemoved(undefined);
           setLiveRemoved(undefined);
+          setLiveSound(firstSound(result.channels));
+          setLiveSolo('');
+          setLiveStates({});
           setLivePlaying(true);
         }
         if (result.added) setLive(result.channels);
@@ -676,12 +690,23 @@ export default function App() {
       setLivePlaying(false);
       setWatchMode(false);
       history.replaceState(null, '', location.pathname);
+      return;
     }
+    const neighbour = next[Math.min(live.indexOf(channel), next.length - 1)];
+    requestAnimationFrame(() =>
+      document
+        .querySelector<HTMLElement>(`[aria-label="More for ${CSS.escape(neighbour.name)}"]`)
+        ?.focus({ preventScroll: true }),
+    );
   }
   function undoLiveRemove() {
     if (!liveRemoved || busy) return;
     if (vods.length || live.some((c) => liveKey(c) === liveKey(liveRemoved.channel))) {
       setLiveRemoved(undefined);
+      return;
+    }
+    if (live.length >= MAX_VODS) {
+      setNotice('Remove another channel before restoring this one.');
       return;
     }
     const next = [...live];
@@ -1103,6 +1128,9 @@ export default function App() {
             </span>
           )}
           {count('loading') > 0 && <span className="summary-item">{count('loading')} loading</span>}
+          {count('unverified') > 0 && (
+            <span className="summary-item">{count('unverified')} unverified</span>
+          )}
           {count('paused') > 0 && <span className="summary-item">{count('paused')} paused</span>}
           {count('offline') > 0 && <span className="summary-item">{count('offline')} offline</span>}
           {count('blocked') + count('error') > 0 && (
@@ -1157,10 +1185,14 @@ export default function App() {
               )}
             </span>
             <div className="add" ref={addForm}>
-              <form className="add-field" onSubmit={addRecordings} aria-label="Add recordings">
+              <form
+                className="add-field"
+                onSubmit={addRecordings}
+                aria-label={live.length ? 'Add channels' : 'Add recordings'}
+              >
                 <Plus size={16} aria-hidden="true" />
                 <label htmlFor="vod-input" className="sr-only">
-                  Add recordings
+                  {live.length ? 'Add channels' : 'Add recordings'}
                 </label>
                 <textarea
                   ref={addField}
@@ -1263,7 +1295,7 @@ export default function App() {
             </button>
             <button
               className="drawer-btn"
-              disabled={!vods.length}
+              disabled={!vods.length && !live.length}
               onClick={menuAction(exportSession)}
             >
               Export session
@@ -1285,7 +1317,7 @@ export default function App() {
             </a>
             <button
               className="drawer-btn danger"
-              disabled={busy || !vods.length}
+              disabled={busy || (!vods.length && !live.length)}
               onClick={menuAction(() => clearWorkspace())}
             >
               Clear workspace
@@ -1417,7 +1449,10 @@ export default function App() {
       {modal === 'help' && (
         <Panel title="Shortcuts" close={() => setModal(null)}>
           <dl className="shortcuts">
-            {SHORTCUTS.map(([keys, label]) => (
+            {(live.length
+              ? SHORTCUTS.filter(([, label]) => LIVE_SHORTCUTS.has(label))
+              : SHORTCUTS
+            ).map(([keys, label]) => (
               <div key={label}>
                 <dt>
                   {keys.map((key) => (

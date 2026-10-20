@@ -1,7 +1,5 @@
 import { useEffect, useRef, useState, type DragEventHandler } from 'react';
 import {
-  ArrowLeft,
-  ArrowRight,
   ArrowUpRight,
   GripVertical,
   LoaderCircle,
@@ -24,7 +22,7 @@ import {
 import { DRIFT_LIMIT } from './syncSummary';
 import { clock as wallClock, formatDelta } from './timeFormat';
 import { TimingControls } from './TimingControls';
-import { PlatformMark } from './ui';
+import { MoveControls, PlatformMark, gripPosition } from './ui';
 import { createPlayerClock } from './playerClock';
 import { createVodGuard, type PlaybackSnapshot, type StopReason } from './playback';
 import { createSeekPreparation, seekPosition, type SeekState } from './seekBarrier';
@@ -751,16 +749,7 @@ export function Player({
           onDragEnd={order.onEnd}
           onClick={(event) => toggleDrawer('move', event.currentTarget)}
           onKeyDown={(event) => {
-            const position =
-              event.key === 'Home'
-                ? 0
-                : event.key === 'End'
-                  ? order.count - 1
-                  : event.key === 'ArrowLeft' || event.key === 'ArrowUp'
-                    ? order.index - 1
-                    : event.key === 'ArrowRight' || event.key === 'ArrowDown'
-                      ? order.index + 1
-                      : null;
+            const position = gripPosition(event.key, order.index, order.count);
             if (position === null) return;
             event.preventDefault();
             order.onMove(position);
@@ -938,41 +927,13 @@ export function Player({
               />
             )}
             {drawer === 'move' && (
-              <div className="drawer-move">
-                <label>
-                  Position
-                  <select
-                    className="field"
-                    value={order.index}
-                    disabled={order.disabled}
-                    onChange={(event) => order.onMove(Number(event.target.value))}
-                  >
-                    {Array.from({ length: order.count }, (_, position) => (
-                      <option key={position} value={position}>
-                        {position + 1} of {order.count}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <button
-                  className="icon-btn"
-                  aria-label={`Move ${vod.channel} earlier`}
-                  title="Move earlier"
-                  disabled={order.disabled || order.index === 0}
-                  onClick={() => order.onMove(order.index - 1)}
-                >
-                  <ArrowLeft size={15} />
-                </button>
-                <button
-                  className="icon-btn"
-                  aria-label={`Move ${vod.channel} later`}
-                  title="Move later"
-                  disabled={order.disabled || order.index === order.count - 1}
-                  onClick={() => order.onMove(order.index + 1)}
-                >
-                  <ArrowRight size={15} />
-                </button>
-              </div>
+              <MoveControls
+                name={vod.channel}
+                index={order.index}
+                count={order.count}
+                disabled={order.disabled}
+                onMove={order.onMove}
+              />
             )}
             {drawer === 'error' && (
               <>

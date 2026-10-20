@@ -11,7 +11,20 @@ const messageOf = (error: unknown) => (error instanceof Error ? error.message : 
 // channels wait for their stream). VODs and clips never join a live session.
 export function opensLive(inputs: string[], recordings: number, liveChannels: number) {
   if (liveChannels) return true;
-  return !recordings && inputs.length > 0 && inputs.every((input) => parseChannelTarget(input));
+  // Unrecognised lines fail on their own; only a VOD or clip gives channels a moment.
+  return (
+    !recordings &&
+    inputs.some((input) => parseChannelTarget(input)) &&
+    !inputs.some((input) => !parseChannelTarget(input) && isMedia(input))
+  );
+}
+function isMedia(input: string) {
+  try {
+    parseMedia(input);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export async function resolveLiveInputs(

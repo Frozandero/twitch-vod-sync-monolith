@@ -4,6 +4,7 @@ import { dayLabel, formatDelta, formatSpan } from './timeFormat';
 import { overlapRange, rulerTicks, viewRange } from './timelineScale';
 import { driftSeconds, syncSummary } from './syncSummary';
 import { readRecent, rememberSession } from './recentSessions';
+import { gripPosition } from './ui';
 
 const a: Vod = {
   platform: 'twitch',
@@ -128,5 +129,15 @@ describe('recent sessions', () => {
     ]);
     expect(readRecent(raw)).toHaveLength(1);
     expect(readRecent('not json')).toEqual([]);
+  });
+});
+
+describe('grip keys', () => {
+  it('step with arrows, jump with Home/End, and ignore other keys', () => {
+    expect(gripPosition('ArrowRight', 1, 4)).toBe(2);
+    expect(gripPosition('ArrowUp', 1, 4)).toBe(0);
+    expect(gripPosition('Home', 3, 4)).toBe(0);
+    expect(gripPosition('End', 0, 4)).toBe(3);
+    expect(gripPosition('Enter', 0, 4)).toBeNull();
   });
 });
