@@ -34,7 +34,6 @@
   --success-soft: #0c2a25;
   --warning: #f2b04d;
   --warning-soft: #2e2009;
-  --scrim: #000000c2;
   --shadow-overlay: 0 12px 32px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.06);
   --video: #000;
   --sans: Geist, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
@@ -442,6 +441,10 @@ code {
   align-items: center;
   gap: 8px;
 }
+.top-panel .primary-btn {
+  height: 32px;
+  font-size: 13px;
+}
 .panel-field .field {
   width: 240px;
   max-width: 100%;
@@ -668,12 +671,14 @@ code {
 }
 .tile {
   min-width: 0;
+  min-height: var(--tile-min-height);
   display: flex;
   flex-direction: column;
   background: var(--surface-raised);
   border: 1px solid var(--line);
   border-radius: 8px;
-  overflow: hidden;
+  /* clip, unlike hidden, keeps the content-based minimum so an open drawer grows the row. */
+  overflow: clip;
 }
 .tile.is-dragging {
   opacity: 0.6;
@@ -1511,6 +1516,9 @@ button.tile-status:hover {
   }
   .top-menu .drawer-body {
     justify-content: flex-start;
+  }
+  .drawer-btn {
+    height: 44px;
   }
   .top-panel {
     flex-wrap: wrap;

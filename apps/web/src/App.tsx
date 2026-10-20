@@ -82,7 +82,7 @@ const SHORTCUTS: [string[], string][] = [
   [['←', '→'], '±5 s'],
   [['S'], 'Resync'],
   [['T'], 'Timeline'],
-  [['F'], 'Watch mode'],
+  [['F', 'Esc'], 'Watch mode'],
   [['/'], 'Add'],
   [['⌘Z'], 'Undo close'],
 ];
@@ -133,6 +133,8 @@ export default function App() {
   const [leaderKey, setLeaderKey] = useState(initial.session?.leaderKey || '');
   const [moment, setMoment] = useState(initial.session?.momentMs || 0);
   const momentRef = useRef(moment);
+  const vodsRef = useRef(vods);
+  vodsRef.current = vods;
   momentRef.current = moment;
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
@@ -322,23 +324,34 @@ export default function App() {
   // Close the add results when the user moves on; keep failures until dismissed.
   useEffect(() => {
     if (!resultsOpen) return;
-    const away = (event: PointerEvent) => {
+    // Results sit in the page flow; close them after a click lands so nothing shifts under it.
+    const away = (event: MouseEvent) => {
       const target = event.target as Node;
       if (!addForm.current?.contains(target) && !resultsNode.current?.contains(target))
         setResultsOpen(false);
     };
     // Clicking into a player iframe blurs the window rather than reaching the document.
-    const blur = () => setResultsOpen(false);
-    document.addEventListener('pointerdown', away, true);
+    let blurTimer: ReturnType<typeof setTimeout> | undefined;
+    const blur = () => {
+      blurTimer = setTimeout(() => setResultsOpen(false), 400);
+    };
+    document.addEventListener('click', away, true);
     addEventListener('blur', blur);
     const settled = !busy && results.length && results.every((r) => r.status !== 'failed');
     const timer = settled ? setTimeout(() => setResultsOpen(false), 6000) : undefined;
     return () => {
-      document.removeEventListener('pointerdown', away, true);
+      document.removeEventListener('click', away, true);
       removeEventListener('blur', blur);
+      clearTimeout(blurTimer);
       clearTimeout(timer);
     };
   }, [resultsOpen, busy, results]);
+  useEffect(() => {
+    if (!watchMode) return;
+    setMenuOpen(false);
+    setModal(null);
+    setResultsOpen(false);
+  }, [watchMode]);
   // Follow the last synced player's clock without repeatedly seeking the others.
   useEffect(() => {
     if (!vods.length) return;
@@ -995,9 +1008,9 @@ export default function App() {
               >
                 Import session
               </button>
-              <button className="ghost-btn" onClick={() => setModal('help')}>
-                How syncing works
-              </button>
+              <a className="ghost-btn" href={`${REPO_URL}#use`} target="_blank" rel="noreferrer">
+                How syncing works <ArrowUpRight size={14} aria-hidden="true" />
+              </a>
             </>
           )}
           <button
@@ -1013,9 +1026,10 @@ export default function App() {
         </div>
       </header>
       {menuOpen && (
-        <nav
+        <div
           className="top-menu"
           id="top-menu"
+          role="group"
           aria-label="More options"
           onKeyDown={(event) => {
             if (event.key !== 'Escape') return;
@@ -1064,7 +1078,7 @@ export default function App() {
           <button className="icon-btn small" aria-label="Close more options" onClick={closeMenu}>
             <X size={14} />
           </button>
-        </nav>
+        </div>
       )}
       {resultsOpen && !!resultRows.length && (
         <div className="add-results" id="add-results" role="status" ref={resultsNode}>
@@ -1146,7 +1160,7 @@ export default function App() {
                 />
               </label>
               <button
-                className="outline-btn"
+                className="primary-btn"
                 onClick={() => {
                   try {
                     writeStorage('vodsync.clientId', clientId);
@@ -1247,7 +1261,7 @@ export default function App() {
             className={`player-grid ${draggingKey ? 'is-reordering' : ''}`}
             style={{
               gridTemplateColumns: `repeat(${tracks}, minmax(0, 1fr))`,
-              gridTemplateRows: `repeat(${rows}, minmax(var(--tile-min-height), 1fr))`,
+              gridTemplateRows: `repeat(${rows}, minmax(auto, 1fr))`,
             }}
           >
             {/* Keep iframe DOM positions stable: moving an iframe reloads Twitch even with React keys. */}
@@ -1283,14 +1297,20 @@ export default function App() {
                   }}
                   onJump={seekShared}
                   onCorrect={(seconds) => {
-                    const next = vods.map((v) =>
+                    // A pending nudge can flush after its recording closed; never restore it.
+                    const current = vodsRef.current;
+                    if (!current.some((v) => vodKey(v) === vodKey(vod))) return;
+                    const next = current.map((v) =>
                       vodKey(v) === vodKey(vod) ? { ...v, correctionSeconds: seconds } : v,
                     );
                     const nextBounds = timelineBounds(next);
                     const resume = playIntent();
                     setVods(next);
                     setNotice('');
-                    syncTo(Math.max(nextBounds.min, Math.min(nextBounds.max, moment)), resume);
+                    syncTo(
+                      Math.max(nextBounds.min, Math.min(nextBounds.max, momentRef.current)),
+                      resume,
+                    );
                   }}
                   onCopy={(url) => void copy(url, `${vod.channel} timestamp link copied`)}
                   order={{
@@ -1351,7 +1371,6 @@ export default function App() {
           onExpanded={setTimeline}
           watchMode={watchMode}
           onExitWatch={() => setWatchMode(false)}
-
           status={barStatus()}
           leaderKey={leaderKey}
           playbackStates={playbackStates}

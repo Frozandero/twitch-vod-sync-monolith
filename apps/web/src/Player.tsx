@@ -23,7 +23,7 @@ import {
 } from '@vodsync/core';
 import { DRIFT_LIMIT } from './syncSummary';
 import { clock as wallClock, formatDelta } from './timeFormat';
-import { TimingControls } from './TimingPanel';
+import { TimingControls } from './TimingControls';
 import { PlatformMark } from './ui';
 import { createPlayerClock } from './playerClock';
 import { createVodGuard, type PlaybackSnapshot, type StopReason } from './playback';
@@ -172,7 +172,7 @@ export function Player({
   onCopy,
   order,
 }: Props) {
-  const gripButton = useRef<HTMLButtonElement>(null);
+  const moreButton = useRef<HTMLButtonElement>(null);
   const drawerNode = useRef<HTMLDivElement>(null);
   const drawerTrigger = useRef<HTMLElement | null>(null);
   const [drawer, setDrawer] = useState<Drawer | null>(null);
@@ -200,7 +200,13 @@ export function Player({
   }
   function closeDrawer() {
     setDrawer(null);
-    requestAnimationFrame(() => drawerTrigger.current?.focus({ preventScroll: true }));
+    // The trigger may be gone (a cleared error label); fall back to the ⋯ button.
+    requestAnimationFrame(() => {
+      const trigger = drawerTrigger.current?.isConnected
+        ? drawerTrigger.current
+        : moreButton.current;
+      trigger?.focus({ preventScroll: true });
+    });
   }
   // Move focus into a drawer as it opens or changes view.
   useEffect(() => {
@@ -211,8 +217,12 @@ export function Player({
   }, [drawer]);
   // A resolved error closes its details so the next one never opens unprompted.
   useEffect(() => {
-    if (!error) setDrawer((open) => (open === 'error' ? null : open));
-  }, [error]);
+    if (error || drawer !== 'error') return;
+    const focused = drawerNode.current?.contains(document.activeElement);
+    setDrawer(null);
+    if (focused) moreButton.current?.focus({ preventScroll: true });
+  }, [error, drawer]);
+  const openDrawer = drawer === 'error' && !error ? null : drawer;
   const key = vodKey(vod),
     demo = vod.provenance === 'demo';
   const external = !supportsPlayback(vod);
@@ -777,11 +787,10 @@ export function Player({
     >
       <div className="tile-head">
         <button
-          ref={gripButton}
           className="icon-btn reorder-handle"
           aria-label={`Reorder ${vod.channel}, position ${order.index + 1} of ${order.count}`}
-          aria-expanded={drawer === 'move'}
-          aria-controls={drawer ? drawerId : undefined}
+          aria-expanded={openDrawer === 'move'}
+          aria-controls={openDrawer ? drawerId : undefined}
           title="Drag to reorder, or click to choose a position. Arrow keys move; Home/End move to first/last."
           disabled={order.disabled}
           draggable={!order.disabled}
@@ -824,8 +833,8 @@ export function Player({
           <button
             type="button"
             className={`tile-status ${status.tone}`}
-            aria-expanded={drawer === 'error'}
-            aria-controls={drawer ? drawerId : undefined}
+            aria-expanded={openDrawer === 'error'}
+            aria-controls={openDrawer ? drawerId : undefined}
             aria-label={`${vod.channel}: ${error}`}
             onClick={(event) => toggleDrawer('error', event.currentTarget)}
           >
@@ -891,10 +900,11 @@ export function Player({
             </>
           )}
           <button
+            ref={moreButton}
             className={`icon-btn ${drawer === 'menu' || drawer === 'timing' ? 'on' : ''}`}
             aria-label={`More for ${vod.channel}`}
             aria-expanded={drawer === 'menu' || drawer === 'timing'}
-            aria-controls={drawer ? drawerId : undefined}
+            aria-controls={openDrawer ? drawerId : undefined}
             onClick={(event) => toggleDrawer('menu', event.currentTarget)}
           >
             <MoreHorizontal size={16} />
@@ -902,7 +912,7 @@ export function Player({
         </div>
       </div>
       {/* The drawer pushes the video down instead of covering it: Twitch pauses covered embeds. */}
-      {drawer && (
+      {openDrawer && (
         <div
           ref={drawerNode}
           className="tile-drawer"

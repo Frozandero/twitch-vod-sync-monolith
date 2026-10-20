@@ -62,7 +62,7 @@ For four or more recordings, the shell uses the viewport height and the grid sha
 
 The playback bar's status slot shows, in priority order: a notice or error, line-up progress (with Retry after 15 seconds and Cancel), start progress, the last closed recording with Undo (shown for 12 seconds; ⌘Z/Ctrl+Z works until the next close), a short confirmation, and otherwise a sync summary (in-sync count, drifting players, unverified players, solo audio) with Resync when a player drifts. Its actions are always icon buttons at the right end of the slot.
 
-Global shortcuts (Space, J/L, ←/→, S, T, F, Esc, /, ⌘Z) are ignored when a text field, menu, or a control that already uses the key has focus. Keys typed into a Twitch iframe go to Twitch.
+Global shortcuts (Space, J/L, ←/→, S, T, F, Esc, /, ⌘Z) are ignored when a text field, or a control that already uses the key, has focus. Keys typed into a Twitch iframe go to Twitch.
 
 Closing a non-source player leaves playback untouched unless the shared moment must clamp to the remaining timeline. Source removal chooses a remaining source and issues a paused sync. The last closed VOD and its former index are kept transiently for Undo; restoration leaves existing players alone, while restoring an empty workspace initializes a paused session. Explicit clear/import discards this undo entry.
 

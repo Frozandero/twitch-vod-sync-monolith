@@ -199,21 +199,19 @@ export function PlaybackBar({
         </div>
       </div>
       {expanded && (
-        <>
-          <Timeline
-            vods={vods}
-            clips={clips}
-            range={range}
-            moment={moment}
-            draft={draft}
-            onDraft={setDraft}
-            localTime={localTime}
-            leaderKey={leaderKey}
-            playbackStates={playbackStates}
-            onSeek={onSeek}
-            onRemove={onRemove}
-          />
-        </>
+        <Timeline
+          vods={vods}
+          clips={clips}
+          range={range}
+          moment={moment}
+          draft={draft}
+          onDraft={setDraft}
+          localTime={localTime}
+          leaderKey={leaderKey}
+          playbackStates={playbackStates}
+          onSeek={onSeek}
+          onRemove={onRemove}
+        />
       )}
     </section>
   );

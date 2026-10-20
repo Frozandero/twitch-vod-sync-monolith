@@ -69,7 +69,7 @@ export function Segmented<T extends string>({
 export function claimsKey(target: EventTarget | null, key: string) {
   const node = target instanceof Element ? target : null;
   if (!node || node === document.body) return false;
-  if (node.closest('input:not([type="range"]), textarea, select, [contenteditable="true"], dialog'))
+  if (node.closest('input:not([type="range"]), textarea, select, [contenteditable="true"]'))
     return true;
   if ((key === ' ' || key === 'Enter') && node.closest('button, a[href], summary, input'))
     return true;
