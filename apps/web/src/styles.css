@@ -41,7 +41,6 @@
   --fast: 120ms;
   --base: 240ms;
   --tile-head: 44px;
-  --tile-min-height: 346px;
   font: 400 14px/20px var(--sans);
   color: var(--ink);
   background: var(--surface);
@@ -671,13 +670,13 @@ code {
 }
 .tile {
   min-width: 0;
-  min-height: var(--tile-min-height);
   display: flex;
   flex-direction: column;
   background: var(--surface-raised);
   border: 1px solid var(--line);
   border-radius: 8px;
-  /* clip, unlike hidden, keeps the content-based minimum so an open drawer grows the row. */
+  /* clip, unlike hidden, keeps the content-based minimum (head + 300 px frame) so an
+     open drawer grows the row instead of hiding the embed. */
   overflow: clip;
 }
 .tile.is-dragging {

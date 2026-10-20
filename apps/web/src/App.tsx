@@ -337,14 +337,18 @@ export default function App() {
     };
     document.addEventListener('click', away, true);
     addEventListener('blur', blur);
-    const settled = !busy && results.length && results.every((r) => r.status !== 'failed');
-    const timer = settled ? setTimeout(() => setResultsOpen(false), 6000) : undefined;
     return () => {
       document.removeEventListener('click', away, true);
       removeEventListener('blur', blur);
       clearTimeout(blurTimer);
-      clearTimeout(timer);
     };
+  }, [resultsOpen]);
+  useEffect(() => {
+    if (!resultsOpen) return;
+    const settled = !busy && results.length && results.every((r) => r.status !== 'failed');
+    if (!settled) return;
+    const timer = setTimeout(() => setResultsOpen(false), 6000);
+    return () => clearTimeout(timer);
   }, [resultsOpen, busy, results]);
   useEffect(() => {
     if (!watchMode) return;

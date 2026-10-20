@@ -215,12 +215,15 @@ export function Player({
       ?.querySelector<HTMLElement>('button:not(:disabled), select, input')
       ?.focus({ preventScroll: true });
   }, [drawer]);
-  // A resolved error closes its details so the next one never opens unprompted.
+  // A resolved error closes its details so the next one never opens unprompted. The
+  // drawer is already gone by then, so remember whether focus was inside it.
+  const focusInDrawer = useRef(false);
   useEffect(() => {
     if (error || drawer !== 'error') return;
-    const focused = drawerNode.current?.contains(document.activeElement);
     setDrawer(null);
-    if (focused) moreButton.current?.focus({ preventScroll: true });
+    const lost = !document.activeElement || document.activeElement === document.body;
+    if (focusInDrawer.current && lost) moreButton.current?.focus({ preventScroll: true });
+    focusInDrawer.current = false;
   }, [error, drawer]);
   const openDrawer = drawer === 'error' && !error ? null : drawer;
   const key = vodKey(vod),
@@ -919,6 +922,10 @@ export function Player({
           id={drawerId}
           role="group"
           aria-label={`${vod.channel} ${drawer === 'menu' ? 'actions' : drawer}`}
+          onFocus={() => (focusInDrawer.current = true)}
+          onBlur={(event) => {
+            if (!event.currentTarget.contains(event.relatedTarget)) focusInDrawer.current = false;
+          }}
           onKeyDown={(event) => {
             if (event.key !== 'Escape') return;
             event.preventDefault();
