@@ -49,7 +49,6 @@ export function PlaybackBar({
   onExpanded,
   watchMode,
   onExitWatch,
-  sheet,
   status,
   leaderKey,
   playbackStates,
@@ -74,8 +73,6 @@ export function PlaybackBar({
   onExpanded: (expanded: boolean) => void;
   watchMode: boolean;
   onExitWatch: () => void;
-  // Phones show the timeline as a modal bottom sheet.
-  sheet: boolean;
   status: BarStatus;
   leaderKey: string;
   playbackStates: Record<string, PlaybackSnapshot>;
@@ -202,24 +199,19 @@ export function PlaybackBar({
         </div>
       </div>
       {expanded && (
-        <>
-          <div className="tl-scrim" onClick={() => onExpanded(false)} />
-          <Timeline
-            vods={vods}
-            clips={clips}
-            range={range}
-            moment={moment}
-            draft={draft}
-            onDraft={setDraft}
-            localTime={localTime}
-            leaderKey={leaderKey}
-            playbackStates={playbackStates}
-            onSeek={onSeek}
-            onRemove={onRemove}
-            onClose={() => onExpanded(false)}
-            sheet={sheet}
-          />
-        </>
+        <Timeline
+          vods={vods}
+          clips={clips}
+          range={range}
+          moment={moment}
+          draft={draft}
+          onDraft={setDraft}
+          localTime={localTime}
+          leaderKey={leaderKey}
+          playbackStates={playbackStates}
+          onSeek={onSeek}
+          onRemove={onRemove}
+        />
       )}
     </section>
   );

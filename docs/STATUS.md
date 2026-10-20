@@ -1,8 +1,17 @@
 # Verification status
 
-Last updated: 2026-10-19.
+Last updated: 2026-10-20.
 
 This file records actual checks and their limits. A passing build does not prove third-party playback is available.
+
+## Real playback and in-flow drawers — 2026-10-20
+
+- The deployed redesign (`996a124`) was played with real Twitch VODs `2905358828` (summit1g, source) and `2905237691` (HasanAbi) in the desktop app's built-in browser. The group start was confirmed, both players held their mapped offsets, and watch mode and the timeline toggle kept both iframes without reloads.
+- The same run showed that floating interface elements partly covering a player paused it or kept it from starting, and that pushing a player mostly out of view paused it ([research note](RESEARCH.md#twitch-playback)). The owner chose inline header drawers. Player popovers, the Move dialog, the Help and Twitch connection dialogs, the add-result dropdown, the phone bottom sheet, and the sticky phone bar were replaced with rows in the page flow.
+- The local build was checked with the same VODs at 1440×900 (an emulated viewport scaled into the pane). Play all confirmed both starts. With both players running, the clock kept advancing and the bar kept reporting 2 in sync through each of these: opening HasanAbi's ⋯ row; switching it to Timing; two +0.1 s nudges (offset +0.2 s → +0.4 s, settling at −0.1 s drift); the top-bar menu row; and the compact Help row (45 px).
+- The first in-flow Help panel was 573 px tall and paused HasanAbi at 43% visible. It was replaced by the shortcut row linked to the README. Twitch connection is now one row (71 px at 772 px wide), and add results show at most four rows before scrolling inside.
+- Layout was checked at 772×854 and 375×812. On a phone: the menu wraps under a fixed close button; Help shows a title line above the shortcuts (167 px); the timing row wraps to three lines; the bar and timeline sit below the stacked players; and there was no page-level horizontal overflow. At 375×812, with the page scrolled so both players were in view, Play all started both and they stayed in sync.
+- Known limits: in stacked layouts, a player scrolled mostly out of view can pause or fail to start, so starting playback from the bottom of a long phone page can leave the top player behind. Twitch's 400-pixel minimum embed is wider than a 375-pixel phone, so the frame is clipped inside its card, as before. Starts failed while the browser pane was hidden. An earlier start failure at 642×854 coincided with the second player being below the fold; that cause was not isolated. Kick playback, physical phones, and screen readers were not rechecked for this change.
 
 ## Torque redesign — 2026-10-19
 

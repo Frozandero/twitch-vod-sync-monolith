@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useRef } from 'react';
 import { ArrowUpRight, X } from 'lucide-react';
 import {
   formatTime,
@@ -30,8 +30,6 @@ export function Timeline({
   playbackStates,
   onSeek,
   onRemove,
-  onClose,
-  sheet,
 }: {
   vods: Vod[];
   clips: ClipMarker[];
@@ -44,17 +42,7 @@ export function Timeline({
   playbackStates: Record<string, PlaybackSnapshot>;
   onSeek: (moment: number) => void;
   onRemove: (vod: Vod) => void;
-  onClose: () => void;
-  sheet: boolean;
 }) {
-  const closeButton = useRef<HTMLButtonElement>(null);
-  // As a phone sheet the timeline is modal: move focus into it and return it on close.
-  useEffect(() => {
-    if (!sheet) return;
-    const previous = document.activeElement as HTMLElement | null;
-    closeButton.current?.focus();
-    return () => previous?.focus();
-  }, [sheet]);
   const shown = draft ?? moment;
   const draftRef = useRef(draft);
   draftRef.current = draft;
@@ -70,24 +58,7 @@ export function Timeline({
     onDraft(null);
   }
   return (
-    <div
-      className="timeline"
-      id="timeline-lanes"
-      role={sheet ? 'dialog' : undefined}
-      aria-modal={sheet || undefined}
-      aria-labelledby={sheet ? 'timeline-heading' : undefined}
-    >
-      <div className="tl-sheet-head">
-        <h2 id="timeline-heading">Timeline</h2>
-        <button
-          ref={closeButton}
-          className="icon-btn"
-          aria-label="Close timeline"
-          onClick={onClose}
-        >
-          <X size={18} />
-        </button>
-      </div>
+    <div className="timeline" id="timeline-lanes">
       <div className="tl-head">
         <div className="tl-key">
           <button type="button" className="tl-key-button" aria-describedby="timeline-key">
