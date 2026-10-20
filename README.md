@@ -1,8 +1,8 @@
-# VOD Sync
+# StreamSync
 
 **[Open the app](https://frozandero.github.io/twitch-vod-sync-monolith/)**
 
-Sync Twitch and Kick recordings in a grid, resolve clips on a shared timeline, and open timestamp links. Static React/TypeScript app deployed to GitHub Pages; no backend or installation.
+Watch Twitch and Kick streams side by side. Sync recordings and clips on a shared timeline with timestamp links, or watch live channels together. Static React/TypeScript app deployed to GitHub Pages; no backend or installation.
 
 ## Use
 
@@ -36,6 +36,14 @@ Sessions save locally. Share them by URL (**Share link**) or import/export JSON 
 
 Current Kick VOD IDs are resolved through explicit mappings in Kick's older public metadata service. The app checks up to 50 recent channel recordings, reuses concurrent lookups, and caches metadata for five minutes. Older or unindexed recordings may fail because Kick's newer service blocks cross-origin browser requests. Missing parents, private/expired recordings, and incomplete broadcasts produce an error; there is no proxy or guessed broadcast date.
 
+## Watch live channels
+
+Paste **`twitch/name`**, **`kick/name`** or channel URLs on their own into an empty workspace to watch those channels live, side by side. At least one must be live now; offline channels join the session and start on their own when their stream begins. Inside a live session the add field takes more channels (live or offline); VODs and clips are refused with an explanation, so close the live channels to sync recordings. Next to a VOD or clip, the same channel inputs keep finding that streamer’s past broadcast instead.
+
+Live channels play at their own live edge: there is no shared clock, timeline or seeking. The playback bar plays and pauses everyone and summarises how many are live, loading, paused or offline. Only the first channel has sound by default; each header has a mute button, and **Listen to … only** in the ⋯ row picks one channel. Twitch headers show the broadcaster latency Twitch reports (for example `2.4 s`) as a link to the channel. Reordering, closing with Undo, watch mode, Share link, export/import and recent sessions work as they do for recordings. A Twitch player that Twitch holds for the viewer, such as behind a content notice or a browser autoplay block, shows **press play**; press play inside it.
+
+Kick live channels use Kick’s own embedded player, which has no controls a website can drive. Pausing removes the Kick player and Play recreates it at the live edge; muting or unmuting reloads it with Kick’s `muted` setting, so those changes re-buffer for a few seconds. Kick has shown some live streams, such as Slots & Casino streams, as offline inside its embed; open them on Kick with the header link.
+
 Use the **UTC / Local** toggle beside the shared clock to switch all clocks to your device's local timezone and back. The date follows the selected timezone; recording offsets and timestamp links still refer to the same moment.
 
 ## Limitations
@@ -46,6 +54,8 @@ Use the **UTC / Local** toggle beside the shared clock to switch all clocks to y
 - The shared seek wait uses Twitch's reported position/buffer and Kick's actual media position/buffered ranges. It does not preload an entire recording or guarantee simultaneous frames; later stalls and browser autoplay restrictions can still occur.
 - Kick playback depends on its undocumented public metadata and CORS-enabled video CDN. The loaded playlist's duration replaces the broadcast duration when they differ. This corrects the end boundary, not missing footage or gaps inside a recording.
 - Twitch requires a 400×300 minimum embed. Small screens have a contained player scroll area.
+- Twitch pauses or refuses to start players that are covered or mostly scrolled out of view; on phones, start playback with the Twitch players you want on screen.
+- Live status comes from the same public metadata lookups (refreshed every minute) and can lag the players. Kick live playback depends on its embed, which the app can only show, hide or reload.
 - Large sessions can strain the browser. There is no visible 12-recording quota; imports/requests have a 100-item resource guard. Oversized share URLs prompt JSON export.
 
 See [research](docs/RESEARCH.md) and [verification status](docs/STATUS.md).

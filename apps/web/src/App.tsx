@@ -14,8 +14,13 @@ import {
 } from 'lucide-react';
 import {
   MAX_VODS,
+  decodeLiveSession,
   decodeSession,
+  encodeLiveSession,
   encodeSession,
+  isLiveSession,
+  liveKey,
+  validateLiveSession,
   formatTime,
   matchMoment,
   momentAt,
@@ -24,11 +29,15 @@ import {
   validateSession,
   vodKey,
   type ClipMarker,
+  type LiveChannel,
+  type LiveSession,
   type Session,
   type Vod,
 } from '@vodsync/core';
 import type { TwitchAuth } from '@vodsync/providers';
 import { resolveRecordingInputs, type InputResult } from './recordingInputs';
+import { opensLive, resolveLiveInputs, type LiveInputResult } from './liveInputs';
+import { LiveBar, LiveGrid, useLiveStatus, type LiveState } from './LiveView';
 import {
   beginLogin,
   configuredClientId,
@@ -53,6 +62,7 @@ import { StartScreen, splitInputs } from './StartScreen';
 import { BrandMark, Kbd, PlatformMark, claimsKey } from './ui';
 
 const SESSION_KEY = 'vodsync.session.v1'; // Preserve and migrate existing workspaces.
+const LIVE_KEY = 'vodsync.live.v1';
 const TIMELINE_KEY = 'vodsync.timelineCollapsed';
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : 'Please retry.');
 const narrowQuery = '(max-width: 700px)';
@@ -60,12 +70,17 @@ const isNarrow = () => typeof matchMedia === 'function' && matchMedia(narrowQuer
 function gridSession(session: Session): Session {
   return { ...session, view: 'grid' };
 }
-function initialState(): { session?: Session; error?: string } {
+function initialState(): { session?: Session; live?: LiveSession; error?: string } {
   try {
-    const shared = new URLSearchParams(location.hash.slice(1)).get('session');
+    const hash = new URLSearchParams(location.hash.slice(1));
+    const shared = hash.get('session');
     if (shared) return { session: gridSession(decodeSession(shared)) };
+    const sharedLive = hash.get('live');
+    if (sharedLive) return { live: decodeLiveSession(sharedLive) };
     const saved = readStorage(SESSION_KEY);
-    return saved ? { session: gridSession(validateSession(JSON.parse(saved))) } : {};
+    if (saved) return { session: gridSession(validateSession(JSON.parse(saved))) };
+    const savedLive = readStorage(LIVE_KEY);
+    return savedLive ? { live: validateLiveSession(JSON.parse(savedLive)) } : {};
   } catch (error) {
     return { error: messageOf(error) };
   }
@@ -130,6 +145,18 @@ export default function App() {
   const [initial] = useState(initialState);
   const [vods, setVods] = useState<Vod[]>(initial.session?.vods || []);
   const [clips, setClips] = useState<ClipMarker[]>(initial.session?.clips || []);
+  // A live session replaces the recording workspace: channels at their own live edge.
+  const [live, setLive] = useState<LiveChannel[]>(initial.live?.channels || []);
+  const [livePlaying, setLivePlaying] = useState(false);
+  // Sound per channel; by default only the first channel is audible.
+  const [liveSound, setLiveSound] = useState<Record<string, boolean>>({});
+  const [liveSolo, setLiveSolo] = useState('');
+  const [liveStates, setLiveStates] = useState<Record<string, LiveState>>({});
+  const [liveRemoved, setLiveRemoved] = useState<{
+    channel: LiveChannel;
+    index: number;
+    shownAt: number;
+  }>();
   const [leaderKey, setLeaderKey] = useState(initial.session?.leaderKey || '');
   const [moment, setMoment] = useState(initial.session?.momentMs || 0);
   const momentRef = useRef(moment);
@@ -139,7 +166,7 @@ export default function App() {
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
   const [pending, setPending] = useState<string[]>([]);
-  const [results, setResults] = useState<InputResult[]>([]);
+  const [results, setResults] = useState<(InputResult | LiveInputResult)[]>([]);
   const [resultsOpen, setResultsOpen] = useState(false);
   const [notice, setNotice] = useState(initial.error || '');
   const [flash, setFlash] = useState('');
@@ -238,6 +265,15 @@ export default function App() {
     validateSession({ version: 2, vods, leaderKey, momentMs: moment, view: 'grid', clips });
   const sessionRef = useRef(session);
   sessionRef.current = session;
+  const liveSession = (): LiveSession =>
+    validateLiveSession({ version: 2, kind: 'live', channels: live });
+  const liveOnline = useLiveStatus(live, auth);
+  const mutedKeys = new Set(
+    live.filter((channel, i) => !(liveSound[liveKey(channel)] ?? i === 0)).map(liveKey),
+  );
+  const updateLiveState = useCallback((key: string, state: LiveState) => {
+    setLiveStates((current) => (current[key] === state ? current : { ...current, [key]: state }));
+  }, []);
 
   useEffect(() => {
     restoreAuth()
@@ -270,11 +306,19 @@ export default function App() {
       /* Transient state while changing recordings. */
     }
   }, [vods, leaderKey, moment, clips]);
+  useEffect(() => {
+    if (!live.length) {
+      writeStorage(LIVE_KEY, null);
+      return;
+    }
+    writeStorage(LIVE_KEY, JSON.stringify(liveSession()));
+  }, [live]);
   // Keep a short local history of sessions; the newest state replaces older ones.
   function remember() {
     try {
-      if (!vods.length) return;
-      const next = rememberSession(readRecent(), sessionRef.current());
+      const entry = live.length ? liveSession() : vods.length ? sessionRef.current() : undefined;
+      if (!entry) return;
+      const next = rememberSession(readRecent(), entry);
       writeRecent(next);
       setRecent(next);
     } catch {
@@ -291,6 +335,15 @@ export default function App() {
     rememberedKeys.current = current;
     if (vods.length && !shrank) remember();
   }, [vods.map(vodKey).join('|'), leaderKey]);
+  const rememberedLive = useRef(new Set<string>());
+  useEffect(() => {
+    const current = new Set(live.map(liveKey));
+    const shrank =
+      current.size < rememberedLive.current.size &&
+      [...current].every((key) => rememberedLive.current.has(key));
+    rememberedLive.current = current;
+    if (live.length && !shrank) remember();
+  }, [live.map(liveKey).join('|')]);
   useEffect(() => {
     const save = () => remember();
     addEventListener('pagehide', save);
@@ -321,6 +374,11 @@ export default function App() {
     const timer = setTimeout(() => setRemoved((r) => (r ? { ...r, shownAt: 0 } : r)), 12000);
     return () => clearTimeout(timer);
   }, [removed?.vod]);
+  useEffect(() => {
+    if (!liveRemoved) return;
+    const timer = setTimeout(() => setLiveRemoved((r) => (r ? { ...r, shownAt: 0 } : r)), 12000);
+    return () => clearTimeout(timer);
+  }, [liveRemoved?.channel]);
   // Close the add results when the user moves on; keep failures until dismissed.
   useEffect(() => {
     if (!resultsOpen) return;
@@ -493,7 +551,21 @@ export default function App() {
     setFlash(text);
     flashTimer.current = setTimeout(() => setFlash(''), 2400);
   }
+  function resetLive() {
+    setLive([]);
+    setLivePlaying(false);
+    setLiveSound({});
+    setLiveSolo('');
+    setLiveStates({});
+    setLiveRemoved(undefined);
+  }
+  function loadLive(next: LiveSession, play = false) {
+    clearWorkspace(false);
+    setLive(next.channels);
+    setLivePlaying(play);
+  }
   function loadSession(next: Session) {
+    resetLive();
     const clean = gridSession(next);
     setVods(clean.vods);
     setClips(clean.clips);
@@ -525,18 +597,31 @@ export default function App() {
     setResults([]);
     setResultsOpen(true);
     try {
-      const result = await resolveRecordingInputs(
-        inputs,
-        { vods, momentMs: moment, leaderKey },
-        auth,
-      );
-      if (result.added) {
-        setVods(result.vods);
-        setClips((current) => mergeClips(current, result.clips));
-        syncTo(result.momentMs, false, result.leaderKey);
+      if (opensLive(inputs, vods.length, live.length)) {
+        const result = await resolveLiveInputs(inputs, live, auth);
+        if (result.added && !live.length) {
+          // A new live session starts playing; the add was the user's gesture.
+          setRemoved(undefined);
+          setLiveRemoved(undefined);
+          setLivePlaying(true);
+        }
+        if (result.added) setLive(result.channels);
+        setInput(result.failures.map((failure) => failure.input).join('\n'));
+        setResults(result.results);
+      } else {
+        const result = await resolveRecordingInputs(
+          inputs,
+          { vods, momentMs: moment, leaderKey },
+          auth,
+        );
+        if (result.added) {
+          setVods(result.vods);
+          setClips((current) => mergeClips(current, result.clips));
+          syncTo(result.momentMs, false, result.leaderKey);
+        }
+        setInput(result.failures.map((failure) => failure.input).join('\n'));
+        setResults(result.results);
       }
-      setInput(result.failures.map((failure) => failure.input).join('\n'));
-      setResults(result.results);
     } catch (error) {
       setNotice(messageOf(error));
       setResultsOpen(false);
@@ -580,8 +665,56 @@ export default function App() {
     if (leaderKey === key || nextMoment !== moment)
       syncTo(nextMoment, false, leaderKey === key ? vodKey(next[0]) : leaderKey);
   }
+  function removeLive(channel: LiveChannel) {
+    if (busy) return;
+    const key = liveKey(channel);
+    const next = live.filter((c) => liveKey(c) !== key);
+    setLive(next);
+    setLiveRemoved({ channel, index: live.indexOf(channel), shownAt: Date.now() });
+    if (liveSolo === key) setLiveSolo('');
+    if (!next.length) {
+      setLivePlaying(false);
+      setWatchMode(false);
+      history.replaceState(null, '', location.pathname);
+    }
+  }
+  function undoLiveRemove() {
+    if (!liveRemoved || busy) return;
+    if (vods.length || live.some((c) => liveKey(c) === liveKey(liveRemoved.channel))) {
+      setLiveRemoved(undefined);
+      return;
+    }
+    const next = [...live];
+    next.splice(Math.min(liveRemoved.index, next.length), 0, liveRemoved.channel);
+    setLive(next);
+    setLiveRemoved(undefined);
+  }
+  function reorderLive(key: string, position: number) {
+    if (busy) return;
+    const from = live.findIndex((c) => liveKey(c) === key);
+    const to = Math.max(0, Math.min(live.length - 1, position));
+    if (from < 0 || from === to) return;
+    const next = [...live];
+    const [channel] = next.splice(from, 1);
+    next.splice(to, 0, channel);
+    setLive(next);
+    if (new URLSearchParams(location.hash.slice(1)).has('live')) {
+      try {
+        const url = new URL(location.href);
+        url.hash = `live=${encodeLiveSession({ version: 2, kind: 'live', channels: next })}`;
+        history.replaceState(null, '', url);
+      } catch (error) {
+        setNotice(messageOf(error));
+      }
+    }
+    setOrderAnnouncement(`${channel.name} moved to position ${to + 1} of ${next.length}.`);
+  }
   function undoRemove() {
     if (!removed || busy) return;
+    if (live.length) {
+      setRemoved(undefined);
+      return;
+    }
     if (vods.some((v) => vodKey(v) === vodKey(removed.vod))) {
       setRemoved(undefined);
       return;
@@ -635,11 +768,13 @@ export default function App() {
     setPlaying(false);
     setWatchMode(false);
     setAudioKey('');
+    resetLive();
     history.replaceState(null, '', location.pathname);
   }
   async function copy(text: string, done: string) {
     try {
       await navigator.clipboard.writeText(text);
+      setNotice('');
       showFlash(done);
     } catch {
       setNotice('Clipboard access was blocked. Open the link to copy it, or export the session.');
@@ -649,6 +784,11 @@ export default function App() {
     try {
       const url = new URL(location.href);
       url.search = '';
+      if (live.length) {
+        url.hash = `live=${encodeLiveSession(liveSession())}`;
+        void copy(url.toString(), `Live session link copied · ${live.length} channels`);
+        return;
+      }
       url.hash = `session=${encodeSession(session())}`;
       void copy(url.toString(), `Session link copied · ${vods.length} recordings`);
     } catch (error) {
@@ -658,11 +798,13 @@ export default function App() {
   function exportSession() {
     try {
       const url = URL.createObjectURL(
-        new Blob([JSON.stringify(session(), null, 2)], { type: 'application/json' }),
+        new Blob([JSON.stringify(live.length ? liveSession() : session(), null, 2)], {
+          type: 'application/json',
+        }),
       );
       const a = document.createElement('a');
       a.href = url;
-      a.download = 'vod-sync-session.json';
+      a.download = live.length ? 'streamsync-live.json' : 'streamsync-session.json';
       a.click();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch (error) {
@@ -744,9 +886,10 @@ export default function App() {
     const emptyStart = event.target === startField.current && !input;
     if (claimsKey(event.target, event.key) && !(mod && emptyStart)) return;
     if (mod) {
-      if (event.key.toLowerCase() === 'z' && removed && !event.shiftKey) {
+      if (event.key.toLowerCase() === 'z' && (removed || liveRemoved) && !event.shiftKey) {
         event.preventDefault();
-        undoRemove();
+        if (removed) undoRemove();
+        else undoLiveRemove();
       }
       return;
     }
@@ -754,7 +897,17 @@ export default function App() {
     if (key === '/') {
       if (watchMode) return;
       event.preventDefault();
-      (vods.length ? addField : startField).current?.focus();
+      (vods.length || live.length ? addField : startField).current?.focus();
+      return;
+    }
+    if (live.length) {
+      const liveActions: Record<string, () => void> = {
+        ' ': () => setLivePlaying((on) => !on),
+        f: () => setWatchMode((on) => !on),
+      };
+      if (!liveActions[key]) return;
+      event.preventDefault();
+      liveActions[key]();
       return;
     }
     if (!vods.length) return;
@@ -917,6 +1070,51 @@ export default function App() {
             : [],
     };
   }
+  function liveBarStatus(): BarStatus {
+    if (notice)
+      return {
+        tone: 'signal',
+        icon: 'alert',
+        text: notice,
+        title: notice,
+        announce: notice,
+        actions: [dismiss(() => setNotice(''))],
+      };
+    if (liveRemoved?.shownAt)
+      return {
+        tone: 'ink',
+        text: `Closed ${liveRemoved.channel.name}`,
+        announce: `Closed ${liveRemoved.channel.name}`,
+        actions: [
+          { label: 'Undo (⌘Z)', icon: <Undo2 size={15} />, onClick: undoLiveRemove },
+          dismiss(() => setLiveRemoved((r) => (r ? { ...r, shownAt: 0 } : r))),
+        ],
+      };
+    if (flash) return { tone: 'success', icon: 'check', text: flash, announce: flash };
+    const states = live.map((channel) => liveStates[liveKey(channel)]);
+    const count = (state: LiveState) => states.filter((s) => s === state).length;
+    const listening = live.find((channel) => liveKey(channel) === liveSolo);
+    return {
+      text: (
+        <>
+          {count('live') > 0 && (
+            <span className="summary-item">
+              <i className="dot success" /> {count('live')} live
+            </span>
+          )}
+          {count('loading') > 0 && <span className="summary-item">{count('loading')} loading</span>}
+          {count('paused') > 0 && <span className="summary-item">{count('paused')} paused</span>}
+          {count('offline') > 0 && <span className="summary-item">{count('offline')} offline</span>}
+          {count('blocked') + count('error') > 0 && (
+            <span className="summary-item">
+              <i className="dot warning" /> {count('blocked') + count('error')} need attention
+            </span>
+          )}
+          {listening && <span className="summary-item">listening to {listening.name}</span>}
+        </>
+      ),
+    };
+  }
   const resultRows = busy
     ? pending.map((item) => ({ input: item, status: 'pending' as const }))
     : results;
@@ -929,7 +1127,7 @@ export default function App() {
       : 'Play all';
   return (
     <div
-      className={`app ${watchMode ? 'watch-mode' : ''} ${vods.length > 3 ? 'fit-height' : ''} ${vods.length ? '' : 'is-empty'}`}
+      className={`app ${watchMode ? 'watch-mode' : ''} ${vods.length > 3 || live.length > 3 ? 'fit-height' : ''} ${vods.length || live.length ? '' : 'is-empty'}`}
     >
       <div className="sr-only" role="status" aria-live="polite">
         {orderAnnouncement}
@@ -937,16 +1135,26 @@ export default function App() {
       <header className="topbar">
         <a className="brand" href={import.meta.env.BASE_URL}>
           <BrandMark />
-          VOD Sync
+          StreamSync
         </a>
-        {!!vods.length && bounds && (
+        {(live.length > 0 || (!!vods.length && bounds)) && (
           <>
             <span className="topbar-divider" />
             <span className="session-meta">
-              <b>
-                {vods.length} recording{vods.length === 1 ? '' : 's'}
-              </b>{' '}
-              · {formatSpan(bounds.max - bounds.min)}
+              {live.length ? (
+                <b>
+                  {live.length} live channel{live.length === 1 ? '' : 's'}
+                </b>
+              ) : (
+                bounds && (
+                  <>
+                    <b>
+                      {vods.length} recording{vods.length === 1 ? '' : 's'}
+                    </b>{' '}
+                    · {formatSpan(bounds.max - bounds.min)}
+                  </>
+                )
+              )}
             </span>
             <div className="add" ref={addForm}>
               <form className="add-field" onSubmit={addRecordings} aria-label="Add recordings">
@@ -961,7 +1169,11 @@ export default function App() {
                   value={input}
                   spellCheck={false}
                   onChange={(e) => setInput(e.target.value)}
-                  placeholder={`Add a VOD, clip or twitch/name at ${clock(moment, localTime)}`}
+                  placeholder={
+                    live.length
+                      ? 'Add a twitch/name or kick/name channel'
+                      : `Add a VOD, clip or twitch/name at ${clock(moment, localTime)}`
+                  }
                   aria-describedby={resultsOpen ? 'add-results' : undefined}
                   disabled={busy}
                   onFocus={() => results.length && setResultsOpen(true)}
@@ -982,7 +1194,7 @@ export default function App() {
           </>
         )}
         <div className="topbar-actions">
-          {vods.length ? (
+          {vods.length || live.length ? (
             <>
               <button
                 className="ghost-btn share-btn"
@@ -1105,16 +1317,26 @@ export default function App() {
               </span>
               <span className="add-detail">
                 {row.status === 'pending' && 'Looking up'}
-                {(row.status === 'added' || row.status === 'existing') && (
-                  <>
-                    <PlatformMark platform={row.vod.platform} /> {row.vod.channel}
-                    {row.status === 'existing' ? (
-                      ' · already in session'
-                    ) : (
-                      <span className="mono"> {formatTime(row.offsetSeconds)}</span>
-                    )}
-                  </>
-                )}
+                {(row.status === 'added' || row.status === 'existing') &&
+                  ('vod' in row ? (
+                    <>
+                      <PlatformMark platform={row.vod.platform} /> {row.vod.channel}
+                      {row.status === 'existing' ? (
+                        ' · already in session'
+                      ) : (
+                        <span className="mono"> {formatTime(row.offsetSeconds)}</span>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      <PlatformMark platform={row.channel.platform} /> {row.channel.name}
+                      {row.status === 'existing'
+                        ? ' · already in session'
+                        : row.live
+                          ? ' · live'
+                          : ' · offline, starts when live'}
+                    </>
+                  ))}
                 {row.status === 'failed' && (
                   <button
                     className="text-btn"
@@ -1223,7 +1445,9 @@ export default function App() {
           if (!file) return;
           try {
             if (file.size > 200000) throw new Error('Session file is too large.');
-            loadSession(validateSession(JSON.parse(await file.text())));
+            const data: unknown = JSON.parse(await file.text());
+            if (isLiveSession(data)) loadLive(validateLiveSession(data));
+            else loadSession(validateSession(data));
           } catch (error) {
             setNotice(messageOf(error));
           }
@@ -1239,7 +1463,29 @@ export default function App() {
         </div>
       )}
       <main className="workspace">
-        {!vods.length ? (
+        {live.length ? (
+          <LiveGrid
+            channels={live}
+            playing={livePlaying}
+            mutedKeys={mutedKeys}
+            online={liveOnline}
+            soloKey={liveSolo}
+            busy={busy}
+            onMute={(channel, muted) => {
+              setLiveSolo('');
+              setLiveSound((current) => ({ ...current, [liveKey(channel)]: !muted }));
+            }}
+            onSolo={(channel) => {
+              setLiveSolo(liveKey(channel));
+              setLiveSound(Object.fromEntries(live.map((c) => [liveKey(c), c === channel])));
+              showFlash(`Listening to ${channel.name} only`);
+            }}
+            onCopy={(channel, url) => void copy(url, `${channel.name} channel link copied`)}
+            onRemove={removeLive}
+            onReorder={reorderLive}
+            onState={updateLiveState}
+          />
+        ) : !vods.length ? (
           <StartScreen
             field={startField}
             input={input}
@@ -1250,14 +1496,18 @@ export default function App() {
             results={results}
             notice={notice}
             recent={recent}
-            onOpen={loadSession}
+            onOpen={(entry) =>
+              isLiveSession(entry)
+                ? loadLive(validateLiveSession(entry))
+                : loadSession(entry as Session)
+            }
             onForget={(savedAt) => {
               const next = recent.filter((entry) => entry.savedAt !== savedAt);
               writeRecent(next);
               setRecent(next);
             }}
-            closed={removed?.vod.channel}
-            onUndo={undoRemove}
+            closed={removed?.vod.channel ?? liveRemoved?.channel.name}
+            onUndo={removed ? undoRemove : undoLiveRemove}
           />
         ) : (
           <div
@@ -1355,6 +1605,15 @@ export default function App() {
           </div>
         )}
       </main>
+      {!!live.length && (
+        <LiveBar
+          playing={livePlaying}
+          onPlayback={() => setLivePlaying((on) => !on)}
+          status={liveBarStatus()}
+          watchMode={watchMode}
+          onExitWatch={() => setWatchMode(false)}
+        />
+      )}
       {!!vods.length && range && (
         <PlaybackBar
           vods={vods}

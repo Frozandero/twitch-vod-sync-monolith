@@ -30,6 +30,7 @@ import { createVodGuard, type PlaybackSnapshot, type StopReason } from './playba
 import { createSeekPreparation, seekPosition, type SeekState } from './seekBarrier';
 import { supportsPlayback } from './capabilities';
 import { createKickPlayer } from './kickPlayer';
+import { loadTwitchSdk as loadSdk, type TwitchEmbed } from './twitchSdk';
 import type { GridPosition } from './gridLayout';
 
 // Player messages can be long; the header shows a short label that opens the full text.
@@ -52,58 +53,7 @@ export type PlayerHandle = {
   play(): void;
   setMuted(muted: boolean): void;
 };
-type TwitchPlayer = Omit<PlayerHandle, 'getSnapshot'> & {
-  getDuration(): number;
-  getVideo(): string;
-  getEnded(): boolean;
-  getPlaybackStats(): { bufferSize?: number } | null;
-  addEventListener(event: string, callback: (event?: unknown) => void): void;
-  removeEventListener(event: string, callback: (event?: unknown) => void): void;
-};
-type TwitchConstructor = {
-  new (element: HTMLElement, options: object): TwitchPlayer;
-  READY: string;
-  PLAYBACK_BLOCKED: string;
-  PLAYING: string;
-  PLAY: string;
-  SEEK: string;
-  ENDED: string;
-};
-declare global {
-  interface Window {
-    Twitch?: { Player: TwitchConstructor };
-  }
-}
-let sdk: Promise<TwitchConstructor> | undefined;
-function loadSdk() {
-  if (window.Twitch) return Promise.resolve(window.Twitch.Player);
-  if (!sdk)
-    sdk = new Promise<TwitchConstructor>((resolve, reject) => {
-      const script = document.createElement('script');
-      script.src = 'https://player.twitch.tv/js/embed/v1.js';
-      const timeout = window.setTimeout(() => {
-        script.remove();
-        sdk = undefined;
-        reject(new Error('Twitch player timed out. Retry or open the VOD directly.'));
-      }, 15000);
-      script.onload = () => {
-        clearTimeout(timeout);
-        if (window.Twitch) resolve(window.Twitch.Player);
-        else {
-          sdk = undefined;
-          reject(new Error('Twitch player is unavailable.'));
-        }
-      };
-      script.onerror = () => {
-        clearTimeout(timeout);
-        script.remove();
-        sdk = undefined;
-        reject(new Error('Twitch player was blocked. Check browser settings or open the VOD.'));
-      };
-      document.head.appendChild(script);
-    });
-  return sdk;
-}
+type TwitchPlayer = TwitchEmbed;
 export type SyncCommand = {
   moment: number;
   playing: boolean;

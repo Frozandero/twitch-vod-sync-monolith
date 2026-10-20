@@ -3,7 +3,9 @@ import {
   matchMoment,
   startMs,
   parseMedia,
+  validateLiveChannel,
   validateVod,
+  type LiveChannel,
   type MediaRef,
   type ResolvedMedia,
   type Vod,
@@ -274,6 +276,30 @@ export async function resolveKickPlayback(vod: Vod, refresh = false, fetcher: Fe
       'Kick did not provide a supported public video playlist. Open the VOD on Kick.',
     );
   return source;
+}
+
+// Live status only. The channel's playback_url is an origin-restricted IVS playlist that
+// this site cannot play; live channels use Kick's documented embed instead, so the URL
+// and its token are never read or kept.
+export async function resolveKickLive(
+  slug: string,
+  fetcher: Fetcher,
+): Promise<{ channel: LiveChannel; live: boolean }> {
+  let data: any;
+  try {
+    data = await kickJson(`https://kick.com/api/v2/channels/${channelSlug(slug)}`, fetcher);
+  } catch (error) {
+    if (error instanceof KickHttpError && error.status === 404)
+      throw new Error(`Kick channel ${slug} was not found.`);
+    throw error;
+  }
+  if (channelSlug(data?.slug) !== slug.toLowerCase())
+    throw new Error('Kick returned a different channel.');
+  const name = typeof data.user?.username === 'string' ? data.user.username : slug;
+  return {
+    channel: validateLiveChannel({ platform: 'kick', channel: slug.toLowerCase(), name }),
+    live: data.livestream?.is_live === true,
+  };
 }
 
 export async function resolveKick(ref: MediaRef, fetcher: Fetcher): Promise<ResolvedMedia> {

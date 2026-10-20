@@ -4,9 +4,11 @@ import {
   formatTime,
   parseChannelTarget,
   parseMedia,
+  type LiveSession,
   type Platform,
   type Session,
 } from '@vodsync/core';
+import type { LiveInputResult } from './liveInputs';
 import type { InputResult } from './recordingInputs';
 import type { RecentSession } from './recentSessions';
 import { dayLabel, shortClock } from './timeFormat';
@@ -41,9 +43,8 @@ export function previewInputs(inputs: string[]): Preview[] {
         input,
         platform: target.platform,
         name: target.channel,
-        kind: 'streamer',
-        hint: hasMedia ? 'Finds the VOD covering that moment' : 'Add a VOD or clip first',
-        tone: hasMedia ? undefined : 'warning',
+        kind: hasMedia ? 'streamer' : 'live',
+        hint: hasMedia ? 'Finds the VOD covering that moment' : 'Opens the live stream',
       };
     try {
       const ref = parseMedia(input);
@@ -84,8 +85,11 @@ function isMedia(input: string) {
   }
 }
 
-const label = (session: Session) => {
-  const names = session.vods.map((vod) => vod.channel);
+const label = (session: Session | LiveSession) => {
+  const names =
+    'kind' in session
+      ? session.channels.map((channel) => channel.name)
+      : session.vods.map((vod) => vod.channel);
   return names.length > 4
     ? `${names.slice(0, 3).join(', ')} +${names.length - 3}`
     : names.join(', ');
@@ -112,10 +116,10 @@ export function StartScreen({
   onSubmit: (event?: FormEvent) => void;
   busy: boolean;
   pending: string[];
-  results: InputResult[];
+  results: (InputResult | LiveInputResult)[];
   notice: string;
   recent: RecentSession[];
-  onOpen: (session: Session) => void;
+  onOpen: (session: Session | LiveSession) => void;
   onForget: (savedAt: number) => void;
   // The channel of a recording that was just closed, so it can be restored.
   closed?: string;
@@ -138,14 +142,15 @@ export function StartScreen({
           </button>
         </div>
       )}
-      <h1>Paste recordings to watch them on one clock</h1>
+      <h1>Watch streams side by side</h1>
       <p className="start-lede">
-        Twitch or Kick VODs, clips and timestamped links. Add <code>twitch/name</code> or{' '}
-        <code>kick/name</code> to find a streamer’s VOD at the same moment.
+        Paste Twitch or Kick VODs, clips and timestamped links to play them on one clock. Paste{' '}
+        <code>twitch/name</code> or <code>kick/name</code> on its own to watch live channels; next
+        to a VOD or clip it finds that streamer’s VOD at the same moment.
       </p>
-      <form className="start-form" onSubmit={onSubmit} aria-label="Add recordings">
+      <form className="start-form" onSubmit={onSubmit} aria-label="Add recordings or channels">
         <label htmlFor="start-input" className="sr-only">
-          Recordings to add
+          Recordings or channels to add
         </label>
         <textarea
           ref={field}
@@ -218,12 +223,18 @@ export function StartScreen({
                   onClick={() => onOpen(session)}
                 >
                   <span className="recent-name">{label(session)}</span>
-                  <span className="mono recent-time">
-                    {shortClock(session.momentMs, false)} UTC
-                  </span>
-                  <span className="recent-date">
-                    {dayLabel(session.momentMs, false).slice(4, -5)}
-                  </span>
+                  {'kind' in session ? (
+                    <span className="recent-time">Live</span>
+                  ) : (
+                    <>
+                      <span className="mono recent-time">
+                        {shortClock(session.momentMs, false)} UTC
+                      </span>
+                      <span className="recent-date">
+                        {dayLabel(session.momentMs, false).slice(4, -5)}
+                      </span>
+                    </>
+                  )}
                 </button>
                 <button
                   type="button"
