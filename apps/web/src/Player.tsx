@@ -24,7 +24,7 @@ import { clock as wallClock, formatDelta } from './timeFormat';
 import { TimingControls } from './TimingControls';
 import { MoveControls, PlatformMark, gripPosition } from './ui';
 import { createPlayerClock } from './playerClock';
-import { createVodGuard, type PlaybackSnapshot, type StopReason } from './playback';
+import { createVodGuard, hasSound, type PlaybackSnapshot, type StopReason } from './playback';
 import { createSeekPreparation, seekPosition, type SeekState } from './seekBarrier';
 import { supportsPlayback } from './capabilities';
 import { createKickPlayer } from './kickPlayer';
@@ -78,6 +78,9 @@ type Props = {
   // The recording that currently plays sound, or '' to follow the source.
   audioKey: string;
   soloed: boolean;
+  // The viewer's speaker choice for this streamer, kept across seeks; undefined follows audioKey.
+  sound: boolean | undefined;
+  onSound: (on: boolean) => void;
   busy: boolean;
   localTime: boolean;
   onSolo: () => void;
@@ -114,6 +117,8 @@ export function Player({
   sourceName,
   audioKey,
   soloed,
+  sound,
+  onSound,
   busy,
   localTime,
   onSolo,
@@ -209,11 +214,14 @@ export function Player({
   durationCallback.current = onDuration;
   const vodRef = useRef(vod);
   vodRef.current = vod;
-  // A soloed player keeps the audio across seeks; otherwise the source plays sound.
+  // Every command reapplies audio, so read the latest choices rather than the header state.
   const audioRef = useRef(audioKey);
   audioRef.current = audioKey;
-  const audible = (leader: string) =>
-    audioRef.current ? audioRef.current === key : leader === key;
+  const soundRef = useRef(sound);
+  soundRef.current = sound;
+  const soundCallback = useRef(onSound);
+  soundCallback.current = onSound;
+  const audible = (leader: string) => hasSound(key, leader, audioRef.current, soundRef.current);
   useEffect(() => {
     const handle = player.current;
     if (!ready || !handle || !command || blockedStatus || command.phase === 'preparing') return;
@@ -224,7 +232,7 @@ export function Player({
     } catch {
       /* The player will apply audio on its next command. */
     }
-  }, [audioKey]);
+  }, [audioKey, sound]);
   useEffect(() => {
     if (external) return;
     let alive = true,
@@ -388,8 +396,14 @@ export function Player({
           duration: (seconds) => {
             if (alive) durationCallback.current(key, seconds);
           },
-          muted: (value) => {
-            if (alive) setMuted(value);
+          muted: (value, byViewer) => {
+            if (!alive) return;
+            setMuted(value);
+            // Kick's own speaker control is a speaker choice too.
+            if (byViewer) {
+              forceMuted.current = false;
+              soundCallback.current(!value);
+            }
           },
           blocked: () => {
             if (!alive) return;
@@ -846,6 +860,7 @@ export function Player({
                   forceMuted.current = false;
                   setError('');
                   setMuted(!muted);
+                  onSound(muted);
                 }}
               >
                 {muted ? <VolumeX size={15} /> : <Volume2 size={15} />}

@@ -109,6 +109,19 @@ describe('Kick player lifecycle', () => {
     expect(callbacks.playing).toHaveBeenCalledOnce();
     player.destroy();
   });
+  it('tells the native speaker control apart from setMuted', () => {
+    const { video, player, callbacks } = setup(new Promise(() => {}));
+    player.setMuted(false);
+    video.dispatchEvent(new Event('volumechange'));
+    expect(callbacks.muted).toHaveBeenLastCalledWith(false, false);
+    video.muted = true;
+    video.dispatchEvent(new Event('volumechange'));
+    expect(callbacks.muted).toHaveBeenLastCalledWith(true, true);
+    player.setMuted(true);
+    video.dispatchEvent(new Event('volumechange'));
+    expect(callbacks.muted).toHaveBeenLastCalledWith(true, false);
+    player.destroy();
+  });
   it('starts native HLS at its offset before reporting ready', async () => {
     const { video, player, callbacks } = setup(
       Promise.resolve('https://stream.kick.com/test.m3u8'),

@@ -39,7 +39,8 @@ type Callbacks = {
   play(): void;
   ended(): void;
   duration(seconds: number): void;
-  muted(value: boolean): void;
+  // byViewer: the change came from the native controls rather than setMuted.
+  muted(value: boolean, byViewer: boolean): void;
   blocked(): void;
   error(message: string): void;
 };
@@ -64,6 +65,7 @@ export function createKickPlayer(
     failed = false,
     hls: Hls | undefined,
     initialized = false,
+    applied = video.muted,
     requested: number | undefined = offset;
   const events = new AbortController();
   const listen = (name: string, callback: () => void) =>
@@ -104,7 +106,7 @@ export function createKickPlayer(
     video.pause();
     callbacks.ended();
   });
-  listen('volumechange', () => callbacks.muted(video.muted));
+  listen('volumechange', () => callbacks.muted(video.muted, video.muted !== applied));
   listen('error', () => fail('Kick video could not be played. Retry or open the VOD on Kick.'));
 
   async function load() {
@@ -184,6 +186,7 @@ export function createKickPlayer(
       });
     },
     setMuted(value: boolean) {
+      applied = value;
       video.muted = value;
     },
     destroy() {

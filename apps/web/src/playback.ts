@@ -60,6 +60,11 @@ export function createVodGuard(
   };
 }
 
+// A speaker set by hand wins, so it survives seeks; then solo audio; otherwise the source.
+export function hasSound(key: string, leader: string, solo: string, choice?: boolean) {
+  return choice ?? (solo ? solo === key : leader === key);
+}
+
 export function alignment(vod: Vod, moment: number, playback?: PlaybackSnapshot) {
   const match = matchMoment(vod, moment);
   if (match.state !== 'playing')

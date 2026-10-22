@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { startMs, type Vod } from '@vodsync/core';
-import { alignment, createVodGuard } from './playback';
+import { alignment, createVodGuard, hasSound } from './playback';
 
 const vod: Vod = {
   id: '2882233662',
@@ -120,5 +120,23 @@ describe('timeline playback alignment', () => {
       'aligned',
     );
     expect(alignment(vod, startMs(vod) + vod.durationSeconds * 1000).state).toBe('ended');
+  });
+});
+describe('recording audio', () => {
+  it('gives the source sound unless a recording is soloed', () => {
+    expect(hasSound('a', 'a', '')).toBe(true);
+    expect(hasSound('b', 'a', '')).toBe(false);
+    expect(hasSound('a', 'a', 'b')).toBe(false);
+    expect(hasSound('b', 'a', 'b')).toBe(true);
+  });
+  it('keeps a speaker set by hand when a seek changes the source', () => {
+    // Muted the source and unmuted another; later commands may name any leader.
+    for (const leader of ['a', 'b', 'c']) {
+      expect(hasSound('a', leader, '', false)).toBe(false);
+      expect(hasSound('b', leader, '', true)).toBe(true);
+    }
+    // Untouched recordings still follow the source.
+    expect(hasSound('c', 'c', '')).toBe(true);
+    expect(hasSound('b', 'a', 'a', true)).toBe(true);
   });
 });

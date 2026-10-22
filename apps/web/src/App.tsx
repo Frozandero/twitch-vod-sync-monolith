@@ -207,6 +207,8 @@ export default function App() {
   const [localTime, setLocalTime] = useState(false);
   const [zoom, setZoom] = useState<'all' | 'overlap'>('all');
   const [audioKey, setAudioKey] = useState('');
+  // Speakers set by hand, by streamer lane. They survive seeks and syncs; solo resets them.
+  const [sound, setSound] = useState<Record<string, boolean>>({});
   const [recent, setRecent] = useState<RecentSession[]>(() => readRecent());
   const [menuOpen, setMenuOpen] = useState(false);
   const menuButton = useRef<HTMLButtonElement>(null);
@@ -600,6 +602,7 @@ export default function App() {
     setResultsOpen(false);
     setNotice('');
     setAudioKey('');
+    setSound({});
     syncTo(clean.momentMs, false, clean.leaderKey);
   }
   async function addRecordings(event?: FormEvent) {
@@ -659,8 +662,9 @@ export default function App() {
     try {
       const handle = handles.current.get(vodKey(vod));
       if (!handle) throw new Error('Wait for this player to load.');
+      // Solo audio ends when another player becomes the source; Resync keeps it.
+      if (vodKey(vod) !== leaderKey) setAudioKey('');
       syncTo(momentAt(vod, handle.getCurrentTime()), !handle.isPaused(), vodKey(vod));
-      setAudioKey('');
       setNotice('');
     } catch (error) {
       setNotice(messageOf(error));
@@ -815,6 +819,7 @@ export default function App() {
     setPlaying(false);
     setWatchMode(false);
     setAudioKey('');
+    setSound({});
     resetLive();
     history.replaceState(null, '', location.pathname);
   }
@@ -1111,7 +1116,10 @@ export default function App() {
                 {
                   label: 'Follow the source audio',
                   icon: <X size={15} />,
-                  onClick: () => setAudioKey(''),
+                  onClick: () => {
+                    setAudioKey('');
+                    setSound({});
+                  },
                 },
               ]
             : [],
@@ -1600,10 +1608,13 @@ export default function App() {
                   sourceName={source?.channel ?? 'the source'}
                   audioKey={audibleKey}
                   soloed={audioKey === lane.key}
+                  sound={sound[lane.key]}
+                  onSound={(on) => setSound((current) => ({ ...current, [lane.key]: on }))}
                   busy={busy}
                   localTime={localTime}
                   onSolo={() => {
                     setAudioKey(lane.key);
+                    setSound({});
                     showFlash(`Listening to ${vod.channel} only`);
                   }}
                   onSeekTo={(offset, correction) => {
