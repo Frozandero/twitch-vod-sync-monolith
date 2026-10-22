@@ -1,15 +1,17 @@
-import { startMs, timelineBounds, type Vod } from '@vodsync/core';
+import { endMs, groupLanes, startMs, timelineBounds, type Vod } from '@vodsync/core';
 
 export type Range = { min: number; max: number };
 
 const MINUTE = 60000;
 const STEPS = [1, 2, 5, 10, 15, 30, 60, 120, 180, 360, 720, 1440].map((m) => m * MINUTE);
 
-// The span every recording covers, or undefined when no moment is shared by all.
+// The span every streamer's lane covers (gaps between one streamer's recordings included),
+// or undefined when no moment is shared by all.
 export function overlapRange(vods: Vod[]): Range | undefined {
-  if (vods.length < 2) return;
-  const min = Math.max(...vods.map(startMs));
-  const max = Math.min(...vods.map((vod) => startMs(vod) + vod.durationSeconds * 1000));
+  const lanes = groupLanes(vods);
+  if (lanes.length < 2) return;
+  const min = Math.max(...lanes.map((lane) => Math.min(...lane.vods.map(startMs))));
+  const max = Math.min(...lanes.map((lane) => Math.max(...lane.vods.map(endMs))));
   return max > min ? { min, max } : undefined;
 }
 

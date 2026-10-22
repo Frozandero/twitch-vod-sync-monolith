@@ -11,7 +11,7 @@ import {
   RotateCw,
   TriangleAlert,
 } from 'lucide-react';
-import type { ClipMarker, Vod } from '@vodsync/core';
+import type { ClipMarker, Lane, Vod } from '@vodsync/core';
 import type { PlaybackSnapshot } from './playback';
 import { Timeline } from './Timeline';
 import type { Range } from './timelineScale';
@@ -110,7 +110,7 @@ export function PlaybackBar({
   leaderKey: string;
   playbackStates: Record<string, PlaybackSnapshot>;
   onSeek: (moment: number) => void;
-  onRemove: (vod: Vod) => void;
+  onRemove: (lane: Lane) => void;
 }) {
   const [draft, setDraft] = useState<number | null>(null);
   // Collapsing the timeline discards an uncommitted seek preview.

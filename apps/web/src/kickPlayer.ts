@@ -93,6 +93,9 @@ export function createKickPlayer(
     initialized = true;
     clearTimeout(timer);
     reportDuration();
+    // hls.js starts at startPosition; native HLS needs its start here. Without it, a player
+    // created while no line-up runs (Undo after Pause all) would sit at 0:00.
+    if (!hls && requested !== undefined && requested > 0) video.currentTime = requested;
     callbacks.ready();
   });
   listen('play', callbacks.play);

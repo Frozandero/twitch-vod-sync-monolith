@@ -1,6 +1,6 @@
 import {
   momentAt,
-  matchMoment,
+  overlaps,
   startMs,
   parseMedia,
   validateLiveChannel,
@@ -8,6 +8,7 @@ import {
   type LiveChannel,
   type MediaRef,
   type ResolvedMedia,
+  type Span,
   type Vod,
 } from '@vodsync/core';
 
@@ -165,9 +166,9 @@ function channelRecordings(slug: string, fetcher: Fetcher): Promise<ChannelRecor
 
 export async function resolveKickChannel(
   slug: string,
-  momentMs: number,
+  spans: Span[],
   fetcher: Fetcher,
-): Promise<ResolvedMedia> {
+): Promise<Vod[]> {
   // List times narrow the search only. Detail metadata must confirm identity,
   // channel, public/completed status, and the half-open broadcast interval.
   const candidates = (await channelRecordings(slug, fetcher))
@@ -176,30 +177,30 @@ export async function resolveKickChannel(
         !item.live &&
         (item.start === undefined ||
           item.duration === undefined ||
-          (momentMs >= item.start && momentMs < item.start + item.duration * 1000)),
+          spans.some(
+            (span) => item.start! < span.max && item.start! + item.duration! * 1000 > span.min,
+          )),
     )
-    .sort((a, b) => (b.start ?? 0) - (a.start ?? 0));
+    .sort((a, b) => (a.start ?? 0) - (b.start ?? 0));
+  const matches = new Map<string, Vod>();
   for (let i = 0; i < candidates.length; i += 3) {
     const batch = await Promise.allSettled(
       candidates.slice(i, i + 3).map((item) => legacyVod(vodRef(item.id, slug), fetcher)),
     );
-    const matches: Vod[] = [];
     for (const result of batch) {
       if (result.status === 'rejected') {
         if (!(result.reason instanceof KickHttpError) || result.reason.status !== 404)
           throw result.reason;
       } else if (
         new URL(result.value.url).pathname.split('/')[1] === slug &&
-        matchMoment(result.value, momentMs).state === 'playing'
+        spans.some((span) => overlaps(result.value, span))
       )
-        matches.push(result.value);
+        matches.set(result.value.id, result.value);
     }
-    matches.sort((a, b) => startMs(b) - startMs(a));
-    if (matches[0])
-      return { vod: matches[0], offsetSeconds: matchMoment(matches[0], momentMs).offsetSeconds };
   }
+  if (matches.size) return [...matches.values()].sort((a, b) => startMs(a) - startMs(b));
   throw new Error(
-    `No available Kick past broadcast for ${slug} covers ${new Date(momentMs).toISOString()}. Checked the channel's public index (up to 50 recent recordings); live, older, deleted, or unavailable VODs may be missing.`,
+    `No available Kick past broadcast for ${slug} overlaps the session's recordings. Checked the channel's public index (up to 50 recent recordings); live, older, deleted, or unavailable VODs may be missing.`,
   );
 }
 async function kickVod(ref: MediaRef, fetcher: Fetcher): Promise<Vod> {

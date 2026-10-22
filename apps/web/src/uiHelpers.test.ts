@@ -63,6 +63,19 @@ describe('timeline scale', () => {
     expect(overlapRange([a, late])).toBeUndefined();
     expect(viewRange([a, late], 'overlap').min).toBe(Date.parse(a.startedAt));
   });
+  it('measures a streamer’s recordings as one lane', () => {
+    const later = {
+      ...b,
+      id: '3',
+      url: 'https://www.twitch.tv/videos/3',
+      startedAt: '2026-10-18T21:30:00Z',
+    };
+    expect(overlapRange([b, later])).toBeUndefined();
+    expect(overlapRange([{ ...a, durationSeconds: 14 * 3600 }, b, later])).toEqual({
+      min: Date.parse(b.startedAt),
+      max: Date.parse('2026-10-18T23:30:00Z'),
+    });
+  });
   it('places round ruler ticks inside the range', () => {
     const range = {
       min: Date.parse('2026-10-18T18:07:00Z'),

@@ -91,6 +91,12 @@ The [Kick channel index](https://kick.com/api/v2/channels/aikobliss/videos) retu
 
 In the local app at `2026-09-23T21:45:49Z`, `twitch/aikobliss` selected `2882074717` at 12959 seconds and `kick/aikobliss` selected canonical `01a0d036-d2e8-7921-a378-da2f05c97032` at 300 seconds. A subsequent `twitch/xqc` target selected `2882233662` at 261 seconds without changing the source or moment. These are metadata-based broadcast matches; player clocks still require separate verification through the existing playback adapters.
 
+### Several recordings per broadcast window — observed 2026-10-22
+
+A user session paired xQc's Twitch VOD `2907037919` (2026-10-21 19:56:15 UTC, 42,906 s) with aikobliss's Kick VOD `01a15fd9-c248-758c-a777-1633953c6808`, the one covering the selected moment at xQc's start. The [Kick channel index](https://kick.com/api/v2/channels/aikobliss/videos) returned 30 entries. The newest two were legacy `3f425916-…` (`start_time` 2026-10-21 19:04:29, 7,325,000 ms) and `bfedf6ec-…` (21:07:36, 38,890,000 ms). Their [detail records](https://kick.com/api/v1/video/bfedf6ec-e389-4a13-a323-165bc21986b7) are public, completed, owned by `aikobliss`, and map to canonical `01a15fd9-…` and `01a1604a-79c0-7709-b786-f76fb269c176`. She restarted 62 seconds after the first recording ended, and the second one covers the rest of xQc's broadcast. The single-moment lookup could never find it.
+
+The owner approved a new rule. A streamer target adds every confirmed archive of that channel overlapping at least one recording in the session (half-open intervals), including archives that don't cover the selected moment. A channel's recordings share one grid tile and one timeline row. The same history bounds apply. Twitch lists archives newest first ([Get Videos](https://dev.twitch.tv/docs/api/reference/#get-videos) `sort=time`), and one channel broadcasts one stream at a time. So paging stops after an archive that ended before every session recording started. If Twitch refuses a deeper page after matches were confirmed (anonymous `IntegrityCheckFailed`), the newer matches are kept.
+
 ## Live channels — observed 2026-10-20
 
 The owner approved live multi-view: live Twitch and Kick channels play side by side at their own live edge, with shared play, pause and mute but no timeline or seeking. Live sessions are separate from VOD sessions.

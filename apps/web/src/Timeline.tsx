@@ -1,12 +1,16 @@
 import { useRef } from 'react';
 import { ArrowUpRight, X } from 'lucide-react';
 import {
+  endMs,
   formatTime,
+  groupLanes,
+  laneVod,
   matchDescription,
   matchMoment,
   startMs,
   vodKey,
   type ClipMarker,
+  type Lane,
   type Vod,
 } from '@vodsync/core';
 import type { PlaybackSnapshot } from './playback';
@@ -41,7 +45,7 @@ export function Timeline({
   leaderKey: string;
   playbackStates: Record<string, PlaybackSnapshot>;
   onSeek: (moment: number) => void;
-  onRemove: (vod: Vod) => void;
+  onRemove: (lane: Lane) => void;
 }) {
   const shown = draft ?? moment;
   const draftRef = useRef(draft);
@@ -52,6 +56,8 @@ export function Timeline({
   const ticks = rulerTicks(range, 6, zoneOffset(range.min, localTime));
   const span = (range.max - range.min) / 1000;
   const byKey = new Map(vods.map((vod) => [vodKey(vod), vod]));
+  // One row per streamer; each of their recordings is a segment on it.
+  const lanes = groupLanes(vods);
   function commit() {
     if (draftRef.current === null) return;
     onSeek(draftRef.current);
@@ -101,34 +107,41 @@ export function Timeline({
         <span />
       </div>
       <div className="tl-body">
-        {vods.map((vod) => {
+        {lanes.map((lane) => {
+          // The recording at the shown moment; the lane's player shows the one at the moment.
+          const vod = laneVod(lane, shown);
           const key = vodKey(vod);
           const match = matchMoment(vod, shown);
-          const playback = playbackStates[key];
-          const drift = driftSeconds(vod, shown, playback);
+          const drift = driftSeconds(vod, shown, playbackStates[key]);
+          const played = laneVod(lane, moment);
+          const playback = playbackStates[vodKey(played)];
           const actual =
             playback?.status === 'ready' && playback.seconds !== null
-              ? startMs(vod) + playback.seconds * 1000
+              ? startMs(played) + playback.seconds * 1000
               : null;
-          const start = percentOf(range, startMs(vod));
-          const end = percentOf(range, startMs(vod) + vod.durationSeconds * 1000);
-          const left = Math.max(0, start);
-          const width = Math.max(0, Math.min(100, end) - left);
           const source = key === leaderKey;
+          const between = match.state === 'before' && lane.vods.indexOf(vod) > 0;
           return (
-            <div className={`tl-row ${match.state}`} key={key}>
-              <div className="tl-name" title={vod.title}>
+            <div className={`tl-row ${match.state}`} key={lane.key}>
+              <div className="tl-name" title={lane.vods.map((item) => item.title).join('\n')}>
                 <PlatformMark platform={vod.platform} />
                 <span>{vod.channel}</span>
               </div>
               <div className="tl-track">
-                {width > 0 && (
-                  <span
-                    className="tl-range"
-                    title={`${vod.channel}: ${clock(startMs(vod), localTime)}–${clock(startMs(vod) + vod.durationSeconds * 1000, localTime)} ${localTime ? 'local' : 'UTC'}`}
-                    style={{ left: `${left}%`, width: `${width}%` }}
-                  />
-                )}
+                {lane.vods.map((item) => {
+                  const left = Math.max(0, percentOf(range, startMs(item)));
+                  const width = Math.max(0, Math.min(100, percentOf(range, endMs(item))) - left);
+                  return (
+                    width > 0 && (
+                      <span
+                        key={vodKey(item)}
+                        className="tl-range"
+                        title={`${item.channel}: ${clock(startMs(item), localTime)}–${clock(endMs(item), localTime)} ${localTime ? 'local' : 'UTC'}`}
+                        style={{ left: `${left}%`, width: `${width}%` }}
+                      />
+                    )
+                  );
+                })}
                 {inView && <span className="tl-selected" style={{ left: `${selected}%` }} />}
                 {actual !== null && actual >= range.min && actual <= range.max && (
                   <span
@@ -145,7 +158,7 @@ export function Timeline({
                   <time>{formatTime(match.offsetSeconds)}</time>
                 ) : (
                   <span className="tl-boundary">
-                    {match.state === 'before' ? 'not started' : 'ended'}
+                    {between ? 'offline' : match.state === 'before' ? 'not started' : 'ended'}
                   </span>
                 )}
                 {drift !== null && !source && (
@@ -175,8 +188,8 @@ export function Timeline({
                   <button
                     className="icon-btn small subtle"
                     aria-label={`Close ${vod.channel}`}
-                    title={`Close ${vod.channel}`}
-                    onClick={() => onRemove(vod)}
+                    title={`Close ${vod.channel}${lane.vods.length > 1 ? ` · ${lane.vods.length} recordings` : ''}`}
+                    onClick={() => onRemove(lane)}
                   >
                     <X size={14} />
                   </button>
@@ -205,7 +218,7 @@ export function Timeline({
             if (!vod) return null;
             const at = startMs(vod) + clip.offsetSeconds * 1000;
             if (at < range.min || at > range.max) return null;
-            const row = vods.indexOf(vod);
+            const row = lanes.findIndex((lane) => lane.vods.includes(vod));
             return (
               <button
                 key={`${clip.platform}:${clip.id}`}

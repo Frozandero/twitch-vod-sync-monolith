@@ -2,16 +2,21 @@ import {
   MAX_VODS,
   matchMoment,
   momentAt,
+  overlaps,
   parseChannelTarget,
   parseMedia,
+  startMs,
   vodKey,
+  vodSpan,
   type ClipMarker,
+  type Match,
   type Vod,
 } from '@vodsync/core';
 import { resolveChannelTarget, resolveMedia, type TwitchAuth } from '@vodsync/providers';
 
 type Context = { vods: Vod[]; momentMs: number; leaderKey: string };
 type Failure = { input: string; error: string };
+// A streamer target can add several recordings, so it can report several results.
 export type InputResult =
   | {
       input: string;
@@ -19,12 +24,14 @@ export type InputResult =
       kind: 'vod' | 'clip' | 'channel';
       vod: Vod;
       offsetSeconds: number;
+      // Where the selected moment falls in this recording.
+      state: Match['state'];
     }
   | { input: string; status: 'failed'; error: string };
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : 'Please retry.');
 
-// Resolve explicit media first, then streamer targets against one captured moment.
-// Network completion order must never choose the source or reorder the session.
+// Resolve explicit media first, then streamer targets against the recordings that are then in
+// the session. Network completion order must never choose the source or reorder the session.
 export async function resolveRecordingInputs(
   inputs: string[],
   context: Context,
@@ -34,9 +41,9 @@ export async function resolveRecordingInputs(
   const existing = new Map(
     context.vods.filter((v) => v.provenance !== 'demo').map((v) => [vodKey(v), v]),
   );
-  const accepted = new Map<number, Vod>();
+  const accepted = new Map<number, Vod[]>();
   const failures = new Map<number, Failure>();
-  const outcomes = new Map<number, InputResult>();
+  const outcomes = new Map<number, InputResult[]>();
   const clips: ClipMarker[] = [];
   const next = new Map(existing);
   let anchor: { vod: Vod; offsetSeconds: number; input: string } | undefined;
@@ -49,17 +56,31 @@ export async function resolveRecordingInputs(
   let leaderKey = context.leaderKey;
   function accept(
     index: number,
-    vod: Vod,
+    vods: Vod[],
     input: string,
     kind: 'vod' | 'clip' | 'channel',
-    offsetSeconds: number,
+    offsetSeconds?: number,
   ) {
-    if (!next.has(vodKey(vod)) && next.size >= MAX_VODS)
+    if (next.size + vods.filter((vod) => !next.has(vodKey(vod))).length > MAX_VODS)
       throw new Error('This session is too large.');
-    const status = next.has(vodKey(vod)) ? 'existing' : 'added';
-    next.set(vodKey(vod), vod);
-    accepted.set(index, vod);
-    outcomes.set(index, { input, status, kind, vod, offsetSeconds });
+    for (const vod of vods) {
+      const status = next.has(vodKey(vod)) ? 'existing' : 'added';
+      // Streamer recordings report where the captured moment falls; media name their own.
+      const match = offsetSeconds === undefined ? matchMoment(vod, momentMs) : undefined;
+      next.set(vodKey(vod), vod);
+      accepted.set(index, [...(accepted.get(index) ?? []), vod]);
+      outcomes.set(index, [
+        ...(outcomes.get(index) ?? []),
+        {
+          input,
+          status,
+          kind,
+          vod,
+          offsetSeconds: offsetSeconds ?? match!.offsetSeconds,
+          state: match?.state ?? 'playing',
+        },
+      ]);
+    }
   }
   function preserve(vod: Vod) {
     const known = existing.get(vodKey(vod));
@@ -84,7 +105,7 @@ export async function resolveRecordingInputs(
         const vod = preserve(result.value.vod);
         momentAt(vod, result.value.offsetSeconds);
         const ref = parseMedia(input);
-        accept(index, vod, input, ref.kind, result.value.offsetSeconds);
+        accept(index, [vod], input, ref.kind, result.value.offsetSeconds);
         if (ref.kind === 'clip')
           clips.push({
             platform: ref.platform,
@@ -106,29 +127,33 @@ export async function resolveRecordingInputs(
       leaderKey = vodKey(anchor.vod);
     }
   }
+  // Targets match the recordings captured here, never each other's additions.
+  const spans = [...next.values()].map(vodSpan);
   const targets = indexed.filter((item) => item.target);
   for (let i = 0; i < targets.length; i += 4) {
     const batch = targets.slice(i, i + 4);
     const results = await Promise.allSettled(
       batch.map(async (item) => {
-        if (!existing.size && !anchor)
+        if (!spans.length)
           throw new Error(
-            'Add a VOD or clip first to choose a broadcast moment, or paste one with the streamer targets.',
+            'Add a VOD or clip first to choose the recordings to match, or paste one with the streamer targets.',
           );
-        return providers.channel(item.input, momentMs, auth);
+        return providers.channel(item.input, spans, auth);
       }),
     );
     results.forEach((result, j) => {
       const { input, index } = batch[j];
       try {
         if (result.status === 'rejected') throw result.reason;
-        const vod = preserve(result.value.vod);
-        const match = matchMoment(vod, momentMs);
-        if (match.state !== 'playing')
+        const vods = result.value
+          .map(preserve)
+          .filter((vod) => spans.some((span) => overlaps(vod, span)))
+          .sort((a, b) => startMs(a) - startMs(b));
+        if (!vods.length)
           throw new Error(
-            'This recording does not cover the selected moment with its saved timing and duration.',
+            'No recording from this streamer overlaps the session with its saved timing and duration.',
           );
-        accept(index, vod, input, 'channel', match.offsetSeconds);
+        accept(index, vods, input, 'channel');
       } catch (error) {
         failures.set(index, { input, error: messageOf(error) });
       }
@@ -136,16 +161,17 @@ export async function resolveRecordingInputs(
   }
   // Keep prior order; new media retain paste order, even when a target precedes the source.
   const ordered = new Map(existing);
-  for (const [, vod] of [...accepted].sort(([a], [b]) => a - b)) ordered.set(vodKey(vod), vod);
+  for (const [, vods] of [...accepted].sort(([a], [b]) => a - b))
+    for (const vod of vods) ordered.set(vodKey(vod), vod);
   for (const [index, failure] of failures)
-    outcomes.set(index, { input: failure.input, status: 'failed', error: failure.error });
+    outcomes.set(index, [{ input: failure.input, status: 'failed', error: failure.error }]);
   return {
     vods: [...ordered.values()],
     momentMs,
     leaderKey,
     added: accepted.size,
     clips,
-    results: [...outcomes].sort(([a], [b]) => a - b).map(([, outcome]) => outcome),
+    results: [...outcomes].sort(([a], [b]) => a - b).flatMap(([, outcome]) => outcome),
     failures: [...failures].sort(([a], [b]) => a - b).map(([, failure]) => failure),
   };
 }

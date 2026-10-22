@@ -210,6 +210,41 @@ export function matchMoment(vod: Vod, moment: number): Match {
   };
 }
 
+export type Span = { min: number; max: number };
+export const endMs = (vod: Vod) => startMs(vod) + vod.durationSeconds * 1000;
+export const vodSpan = (vod: Vod): Span => ({ min: startMs(vod), max: endMs(vod) });
+// Half-open: a recording ending exactly when another starts does not overlap it.
+export const overlaps = (vod: Vod, span: Span) => startMs(vod) < span.max && endMs(vod) > span.min;
+
+// A channel broadcasts one stream at a time, so its recordings share one lane: one grid
+// tile and one timeline row that shows whichever of them the moment falls in.
+export type Lane = { key: string; vods: Vod[] };
+export function laneKey(vod: Vod): string {
+  const slug =
+    vod.platform === 'kick' ? /^\/([\w-]+)\/videos\//.exec(new URL(vod.url).pathname)?.[1] : '';
+  return `${vod.platform}:${(slug || vod.channel).trim().toLowerCase() || vod.id}`;
+}
+// Lanes keep the session order of their first recording; recordings sort by start.
+export function groupLanes(vods: Vod[]): Lane[] {
+  const lanes = new Map<string, Vod[]>();
+  for (const vod of vods) lanes.set(laneKey(vod), [...(lanes.get(laneKey(vod)) ?? []), vod]);
+  return [...lanes].map(([key, list]) => ({
+    key,
+    vods: list.sort((a, b) => startMs(a) - startMs(b) || vodKey(a).localeCompare(vodKey(b))),
+  }));
+}
+// The earliest recording covering the moment; in a gap the next one, after the last its end.
+export function laneVod(lane: Lane, moment: number): Vod {
+  return (
+    lane.vods.find((vod) => matchMoment(vod, moment).state === 'playing') ??
+    lane.vods.find((vod) => startMs(vod) > moment) ??
+    lane.vods[lane.vods.length - 1]
+  );
+}
+// The recordings that have players at a moment, one per lane.
+export const laneVods = (vods: Vod[], moment: number) =>
+  groupLanes(vods).map((lane) => laneVod(lane, moment));
+
 export function validateVod(input: unknown): Vod {
   if (!input || typeof input !== 'object') throw new Error('Invalid recording.');
   const v = input as Vod;

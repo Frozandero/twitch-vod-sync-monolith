@@ -22,6 +22,10 @@ import {
   liveKey,
   validateLiveSession,
   formatTime,
+  groupLanes,
+  laneKey,
+  laneVod,
+  laneVods,
   matchMoment,
   momentAt,
   startMs,
@@ -29,6 +33,7 @@ import {
   validateSession,
   vodKey,
   type ClipMarker,
+  type Lane,
   type LiveChannel,
   type LiveSession,
   type Session,
@@ -171,6 +176,8 @@ export default function App() {
   const vodsRef = useRef(vods);
   vodsRef.current = vods;
   momentRef.current = moment;
+  // A streamer's recordings share one lane: one tile and one timeline row.
+  const lanes = groupLanes(vods);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
   const [pending, setPending] = useState<string[]>([]);
@@ -182,15 +189,17 @@ export default function App() {
   const [draggingKey, setDraggingKey] = useState('');
   const [dropKey, setDropKey] = useState('');
   const [orderAnnouncement, setOrderAnnouncement] = useState('');
+  // The last closed lane: all of its recordings and its former position.
   const [removed, setRemoved] = useState<{
-    vod: Vod;
+    vods: Vod[];
+    name: string;
     index: number;
     moment: number;
     clips: ClipMarker[];
     shownAt: number;
   }>();
   const [watchMode, setWatchMode] = useState(false);
-  const { grid, rows, tracks, positions } = useGridLayout(vods.length);
+  const { grid, rows, tracks, positions } = useGridLayout(lanes.length);
   const [narrow, setNarrow] = useState(isNarrow);
   const [expanded, setExpanded] = useState(
     () => !isNarrow() && readStorage(TIMELINE_KEY) !== 'true',
@@ -383,7 +392,7 @@ export default function App() {
     if (!removed) return;
     const timer = setTimeout(() => setRemoved((r) => (r ? { ...r, shownAt: 0 } : r)), 12000);
     return () => clearTimeout(timer);
-  }, [removed?.vod]);
+  }, [removed?.vods]);
   useEffect(() => {
     if (!liveRemoved) return;
     const timer = setTimeout(() => setLiveRemoved((r) => (r ? { ...r, shownAt: 0 } : r)), 12000);
@@ -443,16 +452,18 @@ export default function App() {
       }
       setPlaybackStates(next);
       const active = commandRef.current;
+      // Each lane plays only its recording at the moment; the others have no player.
+      const shown = laneVods(vods, active?.moment ?? momentRef.current);
       if (active?.phase === 'preparing') {
         setPlaying(false);
-        if (seekBarrier(vods, active.moment, active.serial, next).complete) {
+        if (seekBarrier(shown, active.moment, active.serial, next).complete) {
           startRequestedAt.current = Date.now();
           updateCommand({ ...active, phase: active.playing ? 'starting' : 'released' });
         }
         return;
       }
       if (active?.phase === 'starting') {
-        const progress = startProgress(vods, active.moment, active.serial, next);
+        const progress = startProgress(shown, active.moment, active.serial, next);
         const decision = startDecision(
           progress,
           Date.now() - startRequestedAt.current,
@@ -460,7 +471,7 @@ export default function App() {
         );
         if (decision === 'complete') {
           updateCommand({ ...active, phase: 'released' });
-          setPlaying(anyPlaying(vods, active.moment, next));
+          setPlaying(anyPlaying(shown, active.moment, next));
           const source = vods.find((vod) => vodKey(vod) === active.leader);
           if (source && next[active.leader]?.status === 'ended')
             setMoment(startMs(source) + source.durationSeconds * 1000);
@@ -477,7 +488,7 @@ export default function App() {
       }
       const source = vods.find((v) => vodKey(v) === leaderKey),
         state = next[leaderKey];
-      setPlaying(anyPlaying(vods, momentRef.current, next));
+      setPlaying(anyPlaying(laneVods(vods, momentRef.current), momentRef.current, next));
       if (
         source &&
         state?.status === 'ready' &&
@@ -535,11 +546,12 @@ export default function App() {
   // Keep the current source when it covers the moment; otherwise prefer a playable recording.
   function leaderAt(time: number) {
     const covers = (v: Vod) => matchMoment(v, time).state === 'playing';
-    const current = vods.find((v) => vodKey(v) === leaderKey);
+    const shown = laneVods(vods, time);
+    const current = shown.find((v) => vodKey(v) === leaderKey);
     const leader =
       (current && supportsPlayback(current) && covers(current) ? current : undefined) ??
-      vods.find((v) => supportsPlayback(v) && covers(v)) ??
-      vods.find(covers);
+      shown.find((v) => supportsPlayback(v) && covers(v)) ??
+      shown.find(covers);
     return leader ? vodKey(leader) : leaderKey;
   }
   function seekShared(time: number) {
@@ -654,20 +666,22 @@ export default function App() {
       setNotice(messageOf(error));
     }
   }
-  function remove(vod: Vod) {
+  // Closing a streamer closes every recording in their lane.
+  function remove(lane: Lane) {
     if (busy) return;
-    const key = vodKey(vod);
+    const keys = new Set(lane.vods.map(vodKey));
     const removal = {
-      vod,
-      index: vods.findIndex((v) => vodKey(v) === key),
+      vods: lane.vods,
+      name: lane.vods[0].channel,
+      index: lanes.findIndex((l) => l.key === lane.key),
       moment,
-      clips: clips.filter((clip) => clip.vodKey === key),
+      clips: clips.filter((clip) => keys.has(clip.vodKey)),
       shownAt: Date.now(),
     };
-    const next = vods.filter((v) => vodKey(v) !== key);
+    const next = vods.filter((v) => !keys.has(vodKey(v)));
     setVods(next);
-    setClips((current) => current.filter((clip) => clip.vodKey !== key));
-    if (audioKey === key) setAudioKey('');
+    setClips((current) => current.filter((clip) => !keys.has(clip.vodKey)));
+    if (audioKey === lane.key) setAudioKey('');
     if (!next.length) {
       clearWorkspace(false);
       setRemoved(removal);
@@ -676,8 +690,9 @@ export default function App() {
     setRemoved(removal);
     const { min, max } = timelineBounds(next);
     const nextMoment = Math.max(min, Math.min(max, moment));
-    if (leaderKey === key || nextMoment !== moment)
-      syncTo(nextMoment, false, leaderKey === key ? vodKey(next[0]) : leaderKey);
+    const sourceClosed = keys.has(leaderKey);
+    if (sourceClosed || nextMoment !== moment)
+      syncTo(nextMoment, false, sourceClosed ? vodKey(next[0]) : leaderKey);
   }
   function removeLive(channel: LiveChannel) {
     if (busy) return;
@@ -742,29 +757,34 @@ export default function App() {
       setRemoved(undefined);
       return;
     }
-    if (vods.some((v) => vodKey(v) === vodKey(removed.vod))) {
+    const known = new Set(vods.map(vodKey));
+    const missing = removed.vods.filter((v) => !known.has(vodKey(v)));
+    if (!missing.length) {
       setRemoved(undefined);
       return;
     }
-    if (vods.length >= MAX_VODS) {
+    if (vods.length + missing.length > MAX_VODS) {
       setNotice('Remove another recording before restoring this one.');
       return;
     }
-    const next = [...vods];
-    next.splice(Math.min(removed.index, next.length), 0, removed.vod);
-    setVods(next);
+    const restored = { key: laneKey(missing[0]), vods: missing };
+    const next = [...lanes];
+    next.splice(Math.min(removed.index, next.length), 0, restored);
+    setVods(next.flatMap((lane) => lane.vods));
     setClips((current) => mergeClips(current, removed.clips));
-    if (!vods.length) syncTo(removed.moment, false, vodKey(removed.vod));
+    if (!vods.length) syncTo(removed.moment, false, vodKey(laneVod(restored, removed.moment)));
     setRemoved(undefined);
   }
+  // Moves a whole lane; the session keeps each lane's recordings together.
   function reorder(key: string, position: number) {
     if (busy) return;
-    const from = vods.findIndex((v) => vodKey(v) === key);
-    const to = Math.max(0, Math.min(vods.length - 1, position));
+    const from = lanes.findIndex((lane) => lane.key === key);
+    const to = Math.max(0, Math.min(lanes.length - 1, position));
     if (from < 0 || from === to) return;
-    const next = [...vods];
-    const [vod] = next.splice(from, 1);
-    next.splice(to, 0, vod);
+    const order = [...lanes];
+    const [lane] = order.splice(from, 1);
+    order.splice(to, 0, lane);
+    const next = order.flatMap((item) => item.vods);
     setVods(next);
     // A loaded share takes precedence over local storage on refresh.
     if (new URLSearchParams(location.hash.slice(1)).has('session')) {
@@ -776,7 +796,7 @@ export default function App() {
         setNotice(messageOf(error));
       }
     }
-    setOrderAnnouncement(`${vod.channel} moved to position ${to + 1} of ${next.length}.`);
+    setOrderAnnouncement(`${lane.vods[0].channel} moved to position ${to + 1} of ${order.length}.`);
   }
   function clearWorkspace(keepInRecent = true) {
     if (busy) return;
@@ -848,7 +868,7 @@ export default function App() {
         /* An unavailable player is not playing. */
       }
     }
-    return anyPlaying(vods, moment, states);
+    return anyPlaying(laneVods(vods, moment), moment, states);
   }
   function playback() {
     const active = commandRef.current;
@@ -860,13 +880,10 @@ export default function App() {
       cancelSeek();
       return;
     }
-    const leader =
-      vods.find(
-        (v) =>
-          supportsPlayback(v) &&
-          vodKey(v) === leaderKey &&
-          matchMoment(v, moment).state === 'playing',
-      ) ?? vods.find((v) => supportsPlayback(v) && matchMoment(v, moment).state === 'playing');
+    const playable = laneVods(vods, moment).filter(
+      (v) => supportsPlayback(v) && matchMoment(v, moment).state === 'playing',
+    );
+    const leader = playable.find((v) => vodKey(v) === leaderKey) ?? playable[0];
     if (!leader) {
       setNotice('No recording covers this moment. Seek to a recorded part of the timeline.');
       return;
@@ -961,22 +978,25 @@ export default function App() {
 
   const preparing = command?.phase === 'preparing';
   const starting = command?.phase === 'starting';
+  // The recording each lane's player shows at the selected moment.
+  const shown = laneVods(vods, moment);
   const startingProgress = starting
-    ? startProgress(vods, command.moment, command.serial, playbackStates)
+    ? startProgress(laneVods(vods, command.moment), command.moment, command.serial, playbackStates)
     : null;
   const bufferProgress = preparing
-    ? seekBarrier(vods, command.moment, command.serial, playbackStates)
+    ? seekBarrier(laneVods(vods, command.moment), command.moment, command.serial, playbackStates)
     : null;
   const intent = preparing || starting ? command.playing : playing;
-  const coverable = vods.some(
+  const coverable = shown.some(
     (vod) => supportsPlayback(vod) && matchMoment(vod, moment).state === 'playing',
   );
   const source = vods.find((vod) => vodKey(vod) === leaderKey);
-  // A soloed recording that doesn't cover the moment hands audio back to the source.
-  const soloed = vods.find(
-    (vod) => vodKey(vod) === audioKey && matchMoment(vod, moment).state === 'playing',
+  // Solo audio follows a streamer across their recordings. One that doesn't cover the
+  // moment hands audio back to the source.
+  const soloed = shown.find(
+    (vod) => laneKey(vod) === audioKey && matchMoment(vod, moment).state === 'playing',
   );
-  const audibleKey = soloed ? audioKey : '';
+  const audibleKey = soloed ? vodKey(soloed) : '';
   const bounds = vods.length ? timelineBounds(vods) : undefined;
   const overlap = overlapRange(vods);
   const range = vods.length
@@ -1042,8 +1062,8 @@ export default function App() {
     if (removed?.shownAt)
       return {
         tone: 'ink',
-        text: `Closed ${removed.vod.channel}`,
-        announce: `Closed ${removed.vod.channel}`,
+        text: `Closed ${removed.name}`,
+        announce: `Closed ${removed.name}`,
         actions: [
           { label: 'Undo (⌘Z)', icon: <Undo2 size={15} />, onClick: undoRemove },
           dismiss(() => setRemoved((r) => (r ? { ...r, shownAt: 0 } : r))),
@@ -1055,7 +1075,7 @@ export default function App() {
         text: 'No recording covers this moment',
         announce: 'No recording covers this moment',
       };
-    const summary = syncSummary(vods, moment, playbackStates, leaderKey);
+    const summary = syncSummary(shown, moment, playbackStates, leaderKey);
     return {
       // Drift values change every half second; the summary isn't announced.
       text: (
@@ -1157,7 +1177,7 @@ export default function App() {
       : 'Play all';
   return (
     <div
-      className={`app ${watchMode ? 'watch-mode' : ''} ${vods.length > 3 || live.length > 3 ? 'fit-height' : ''} ${vods.length || live.length ? '' : 'is-empty'}`}
+      className={`app ${watchMode ? 'watch-mode' : ''} ${lanes.length > 3 || live.length > 3 ? 'fit-height' : ''} ${vods.length || live.length ? '' : 'is-empty'}`}
     >
       <div className="sr-only" role="status" aria-live="polite">
         {orderAnnouncement}
@@ -1332,8 +1352,8 @@ export default function App() {
       )}
       {resultsOpen && !!resultRows.length && (
         <div className="add-results" id="add-results" role="status" ref={resultsNode}>
-          {resultRows.map((row) => (
-            <div className={`add-row ${row.status}`} key={row.input}>
+          {resultRows.map((row, index) => (
+            <div className={`add-row ${row.status}`} key={`${index}:${row.input}`}>
               <span className="add-icon" aria-hidden="true">
                 {row.status === 'pending' ? (
                   <LoaderCircle className="spin" size={14} />
@@ -1357,6 +1377,10 @@ export default function App() {
                       <PlatformMark platform={row.vod.platform} /> {row.vod.channel}
                       {row.status === 'existing' ? (
                         ' · already in session'
+                      ) : row.state === 'before' ? (
+                        ` · starts ${clock(startMs(row.vod), localTime)}`
+                      ) : row.state === 'ended' ? (
+                        ` · ended ${clock(startMs(row.vod) + row.vod.durationSeconds * 1000, localTime)}`
                       ) : (
                         <span className="mono"> {formatTime(row.offsetSeconds)}</span>
                       )}
@@ -1543,7 +1567,7 @@ export default function App() {
               writeRecent(next);
               setRecent(next);
             }}
-            closed={removed?.vod.channel ?? liveRemoved?.channel.name}
+            closed={removed?.name ?? liveRemoved?.channel.name}
             onUndo={removed ? undoRemove : undoLiveRemove}
           />
         ) : (
@@ -1555,13 +1579,16 @@ export default function App() {
               gridTemplateRows: `repeat(${rows}, minmax(auto, 1fr))`,
             }}
           >
-            {/* Keep iframe DOM positions stable: moving an iframe reloads Twitch even with React keys. */}
-            {[...vods]
-              .sort((a, b) => vodKey(a).localeCompare(vodKey(b)))
-              .map((vod) => (
+            {/* Keep iframe DOM positions stable: moving an iframe reloads Twitch even with React keys.
+                A lane's tile is replaced in place when the moment moves to its next recording. */}
+            {[...lanes]
+              .sort((a, b) => a.key.localeCompare(b.key))
+              .map((lane) => ({ lane, vod: laneVod(lane, moment), index: lanes.indexOf(lane) }))
+              .map(({ lane, vod, index }) => (
                 <Player
                   key={vodKey(vod)}
                   vod={vod}
+                  part={{ index: lane.vods.indexOf(vod), count: lane.vods.length }}
                   source={vodKey(vod) === leaderKey}
                   command={command}
                   moment={moment}
@@ -1572,11 +1599,11 @@ export default function App() {
                   drift={driftSeconds(vod, moment, playbackStates[vodKey(vod)])}
                   sourceName={source?.channel ?? 'the source'}
                   audioKey={audibleKey}
-                  soloed={audioKey === vodKey(vod)}
+                  soloed={audioKey === lane.key}
                   busy={busy}
                   localTime={localTime}
                   onSolo={() => {
-                    setAudioKey(vodKey(vod));
+                    setAudioKey(lane.key);
                     showFlash(`Listening to ${vod.channel} only`);
                   }}
                   onSeekTo={(offset, correction) => {
@@ -1605,17 +1632,17 @@ export default function App() {
                   }}
                   onCopy={(url) => void copy(url, `${vod.channel} timestamp link copied`)}
                   order={{
-                    index: vods.indexOf(vod),
-                    position: positions[vods.indexOf(vod)],
-                    count: vods.length,
-                    disabled: busy || vods.length < 2,
-                    dragging: draggingKey === vodKey(vod),
-                    target: dropKey === vodKey(vod) && draggingKey !== vodKey(vod),
+                    index,
+                    position: positions[index],
+                    count: lanes.length,
+                    disabled: busy || lanes.length < 2,
+                    dragging: draggingKey === lane.key,
+                    target: dropKey === lane.key && draggingKey !== lane.key,
                     onStart: (event) => {
-                      event.dataTransfer.setData('text/plain', vodKey(vod));
+                      event.dataTransfer.setData('text/plain', lane.key);
                       event.dataTransfer.effectAllowed = 'move';
-                      setDraggingKey(vodKey(vod));
-                      setDropKey(vodKey(vod));
+                      setDraggingKey(lane.key);
+                      setDropKey(lane.key);
                     },
                     onEnd: () => {
                       setDraggingKey('');
@@ -1625,18 +1652,18 @@ export default function App() {
                       if (!draggingKey) return;
                       event.preventDefault();
                       event.dataTransfer.dropEffect = 'move';
-                      setDropKey(vodKey(vod));
+                      setDropKey(lane.key);
                     },
                     onDrop: (event) => {
                       if (!draggingKey) return;
                       event.preventDefault();
-                      reorder(draggingKey, vods.indexOf(vod));
+                      reorder(draggingKey, index);
                       setDraggingKey('');
                       setDropKey('');
                     },
-                    onMove: (index) => reorder(vodKey(vod), index),
+                    onMove: (position) => reorder(lane.key, position),
                   }}
-                  onRemove={() => remove(vod)}
+                  onRemove={() => remove(lane)}
                 />
               ))}
           </div>

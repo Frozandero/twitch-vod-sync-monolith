@@ -2,6 +2,7 @@ import type { FormEvent, RefObject } from 'react';
 import { LoaderCircle, Plus, Undo2, X } from 'lucide-react';
 import {
   formatTime,
+  groupLanes,
   parseChannelTarget,
   parseMedia,
   type LiveSession,
@@ -44,7 +45,7 @@ export function previewInputs(inputs: string[]): Preview[] {
         platform: target.platform,
         name: target.channel,
         kind: hasMedia ? 'streamer' : 'live',
-        hint: hasMedia ? 'Finds the VOD covering that moment' : 'Opens the live stream',
+        hint: hasMedia ? 'Finds their VODs overlapping it' : 'Opens the live stream',
       };
     try {
       const ref = parseMedia(input);
@@ -89,7 +90,7 @@ const label = (session: Session | LiveSession) => {
   const names =
     'kind' in session
       ? session.channels.map((channel) => channel.name)
-      : session.vods.map((vod) => vod.channel);
+      : groupLanes(session.vods).map((lane) => lane.vods[0].channel);
   return names.length > 4
     ? `${names.slice(0, 3).join(', ')} +${names.length - 3}`
     : names.join(', ');
@@ -146,7 +147,7 @@ export function StartScreen({
       <p className="start-lede">
         Paste Twitch or Kick VODs, clips and timestamped links to play them on one clock. Paste{' '}
         <code>twitch/name</code> or <code>kick/name</code> on its own to watch live channels; next
-        to a VOD or clip it finds that streamer’s VOD at the same moment.
+        to a VOD or clip it finds every VOD of that streamer that overlaps it.
       </p>
       <form className="start-form" onSubmit={onSubmit} aria-label="Add recordings or channels">
         <label htmlFor="start-input" className="sr-only">

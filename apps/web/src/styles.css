@@ -714,7 +714,8 @@ code {
   white-space: nowrap;
   font-weight: 500;
 }
-.tile-source {
+.tile-source,
+.tile-part {
   flex: none;
   font-size: 12px;
   color: var(--ink-subtle);

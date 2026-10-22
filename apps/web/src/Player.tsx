@@ -62,6 +62,8 @@ export type SyncCommand = {
 };
 type Props = {
   vod: Vod;
+  // This recording's place among its streamer's recordings in the lane.
+  part: { index: number; count: number };
   source: boolean;
   command: SyncCommand | null;
   moment: number;
@@ -99,6 +101,7 @@ type Props = {
 };
 export function Player({
   vod,
+  part,
   source,
   command,
   moment,
@@ -701,7 +704,7 @@ export function Player({
     !external && blockedStatus
       ? blockedStatus === 'before'
         ? {
-            title: `Starts in ${formatTime(match.gapSeconds)}`,
+            title: `${part.index ? 'Next broadcast' : 'Starts'} in ${formatTime(match.gapSeconds)}`,
             detail: `Live at ${wallClock(startMs(vod), localTime)}${localTime ? '' : ' UTC'}`,
             action: 'Move everyone to its start',
             run: () => onJump(startMs(vod)),
@@ -761,6 +764,14 @@ export function Player({
         <strong className="tile-name" title={vod.title}>
           {vod.channel}
         </strong>
+        {part.count > 1 && (
+          <span
+            className="tile-part mono"
+            title={`Recording ${part.index + 1} of ${part.count} from ${vod.channel}. The player moves to the one at the selected moment.`}
+          >
+            {part.index + 1}/{part.count}
+          </span>
+        )}
         {source && (
           <span className="tile-source" title="Reference clock and audio for the session">
             source
@@ -911,6 +922,7 @@ export function Player({
                 </button>
                 <button className="drawer-btn danger" disabled={busy} onClick={onRemove}>
                   Close {vod.channel}
+                  {part.count > 1 && ` · ${part.count} recordings`}
                 </button>
               </>
             )}

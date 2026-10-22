@@ -1,8 +1,26 @@
 # Verification status
 
-Last updated: 2026-10-20.
+Last updated: 2026-10-22.
 
 This file records actual checks and their limits. A passing build does not prove third-party playback is available.
+
+## Every overlapping VOD per streamer, one lane per streamer — 2026-10-22
+
+- Report: in a session of xQc's Twitch VOD `2907037919` and aikobliss's Kick VOD `01a15fd9-…`, `kick/aikobliss` found only the first of her two VODs that overlap xQc's broadcast. The lookup stopped at the one archive covering the selected moment ([research note](RESEARCH.md#several-recordings-per-broadcast-window--observed-2026-10-22)).
+- The owner chose these rules. A streamer target adds every archive of that channel that overlaps any recording in the session, even one that doesn't cover the moment, with no extra cap beyond the existing history bounds. A channel's recordings share one grid tile and one timeline row. Closing the streamer closes all of them.
+- `npm run check` passed: TypeScript, 250 tests, and the production build. New coverage: lane grouping and selection, half-open overlap, multi-archive Twitch and Kick lookups, the Twitch paging stop and refused-page handling, multi-result inputs, and lane overlap zoom.
+- With the user's session in the desktop app's built-in browser at 1440×900, against the real providers:
+  - `kick/aikobliss` reported the first VOD as already in session and added `01a1604a-79c0-7709-b786-f76fb269c176`, which starts at 21:07:36. The session showed 3 recordings in 2 tiles. The timeline row had both segments (19:04:29–21:06:02 and 21:07:36–07:55:46).
+  - Seeking to 21:07:00 put the tile on `2/2` with "Next broadcast in 00:00:36" and no media element, and the row read `offline`. The line-up waited only on xQc (0/1).
+  - Seeking to 21:10:00 loaded the second Kick VOD at 144 s, and the group lined up 2/2.
+  - Playing from 21:07:25 with xQc as source: at 21:07:36 the tile created the second VOD's player, which started on its own, 2.4 s behind. S resynced both to "2 in sync" while playing.
+  - Closing aikobliss from the timeline removed both recordings ("Closed aikobliss", 1 recording). Ctrl+Z restored both in their lane and position.
+  - Home on the lane's grip moved it first. Both recordings moved together in the saved and shared order, with no media element remounted.
+  - At 375×812 the headers (with the `1/2` chip) and the two add-result rows fit without page overflow.
+- Fixed in the same change, found during these checks: after Pause all, a Kick player restored by Undo stayed at 0:00 (−45 s drift) until the next seek. Single-VOD Undo had the same problem before lanes. Native-HLS Kick players got their start only from the seek effect, which skips cancelled commands, while hls.js uses `startPosition` and Twitch's embed URL carries the time. Native HLS now applies the start offset on `loadedmetadata`, before reporting ready (regression test added). In this browser, which uses native HLS for `stream.kick.com`, repeating Play all, Pause all, close aikobliss and Ctrl+Z at 21:08:25 restored the second VOD paused at 49.97 s, with the bar at "2 in sync". `npm run check` passes with 251 tests.
+- Known limits:
+  - The browser pane was hidden during the playback checks; Twitch still started.
+  - Not verified: the authenticated Twitch path with several archives (fixture-tested only), a Twitch-to-Twitch handoff inside one lane, and physical phones.
 
 ## Live multi-view and StreamSync name — 2026-10-20
 
@@ -49,7 +67,7 @@ This file records actual checks and their limits. A passing build does not prove
 
 ## Automated coverage
 
-216 core/provider/player/input/layout/interface-helper tests pass, with TypeScript and production-build checks. Coverage includes timestamp formats, URL validation, timezones, exact start/end boundaries, gaps, corrections, subsecond arithmetic, Unicode sessions, v1 migration, oversized shares, stripping unknown credentials, clip zero/null offsets, missing VODs, uploads/highlights, official API routing, auth errors, initial unconfirmed player clocks, finished/foreign VOD detachment, drift labels, validated paused-seek acknowledgments, stale command rejection, buffer stability, slow/failed players, boundary exclusions, confirmed PLAYING starts, bounded retry decisions, target-only playback, Kick VOD/clip canonical IDs, restricted/malformed metadata, CDN allowlisting, source refresh, and mixed-provider playback barriers. Native-player tests cover real-position prerequisites, disjoint buffers, bounded first-frame seeks, late source resolution after removal/timeout, event-based start confirmation, and cancelled play promises. Streamer-target coverage includes shorthand/profile parsing, clip disambiguation, matching older pages, cursor repetition and page limits, owner validation, archive-only intervals, Kick canonical detail confirmation, restriction failures, captured target moments, mixed source/target batches, failure isolation, order, deduplication, and preserved corrections/durations. Layout tests cover 2×2 grouping, balanced incomplete rows, desktop/tablet/mobile widths, and complete non-overlapping placement for sessions of 1–100 recordings.
+248 core/provider/player/input/layout/interface-helper tests pass, with TypeScript and production-build checks. Coverage includes timestamp formats, URL validation, timezones, exact start/end boundaries, gaps, corrections, subsecond arithmetic, Unicode sessions, v1 migration, oversized shares, stripping unknown credentials, clip zero/null offsets, missing VODs, uploads/highlights, official API routing, auth errors, initial unconfirmed player clocks, finished/foreign VOD detachment, drift labels, validated paused-seek acknowledgments, stale command rejection, buffer stability, slow/failed players, boundary exclusions, confirmed PLAYING starts, bounded retry decisions, target-only playback, Kick VOD/clip canonical IDs, restricted/malformed metadata, CDN allowlisting, source refresh, and mixed-provider playback barriers. Native-player tests cover real-position prerequisites, disjoint buffers, bounded first-frame seeks, late source resolution after removal/timeout, event-based start confirmation, and cancelled play promises. Streamer-target coverage includes shorthand/profile parsing, clip disambiguation, matching older pages, cursor repetition and page limits, owner validation, archive-only intervals, Kick canonical detail confirmation, restriction failures, captured session spans, every overlapping archive per target, the paging stop, streamer lanes, mixed source/target batches, failure isolation, order, deduplication, and preserved corrections/durations. Layout tests cover 2×2 grouping, balanced incomplete rows, desktop/tablet/mobile widths, and complete non-overlapping placement for sessions of 1–100 recordings.
 
 ## Custom domain attempt and rollback — 2026-09-25
 

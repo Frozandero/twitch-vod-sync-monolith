@@ -3,7 +3,8 @@ export { resolveKickPlayback } from './kick';
 import {
   parseMedia,
   parseChannelTarget,
-  matchMoment,
+  endMs,
+  overlaps,
   startMs,
   parseTime,
   validateLiveChannel,
@@ -11,6 +12,7 @@ import {
   type LiveChannel,
   type MediaRef,
   type ResolvedMedia,
+  type Span,
   type Vod,
 } from '@vodsync/core';
 export type TwitchAuth = { clientId: string; token: string };
@@ -30,17 +32,24 @@ async function json(url: string, options: RequestInit, fetcher: Fetcher): Promis
     );
   return response.json();
 }
+// A streamer target adds every archive of that channel overlapping one of the session's
+// recordings; spans are their half-open broadcast intervals.
 export async function resolveChannelTarget(
   input: string,
-  momentMs: number,
+  spans: Span[],
   auth?: TwitchAuth,
   fetcher: Fetcher = fetch,
-): Promise<ResolvedMedia> {
+): Promise<Vod[]> {
   const target = parseChannelTarget(input);
   if (!target) throw new Error('Use twitch/name or kick/name for a streamer target.');
-  if (!Number.isFinite(momentMs) || !Number.isFinite(new Date(momentMs).getTime()))
-    throw new Error('Select a broadcast moment first.');
-  if (target.platform === 'kick') return resolveKickChannel(target.channel, momentMs, fetcher);
+  if (
+    !spans.length ||
+    spans.some(
+      (span) => !Number.isFinite(span.min) || !Number.isFinite(span.max) || span.max <= span.min,
+    )
+  )
+    throw new Error('Add a VOD or clip first to choose the recordings to match.');
+  if (target.platform === 'kick') return resolveKickChannel(target.channel, spans, fetcher);
   const { channel } = target;
   const user = auth
     ? await helix(
@@ -58,47 +67,56 @@ export async function resolveChannelTarget(
       user.login.toLowerCase() !== channel)
   )
     throw new Error('Twitch returned a different channel.');
+  const earliest = Math.min(...spans.map((span) => span.min));
+  const matches: Vod[] = [];
   let cursor: string | null = null;
   const cursors = new Set<string>();
   for (let page = 0; page < 10; page++) {
     let items: any[];
     let next: unknown;
-    if (auth) {
-      const params = new URLSearchParams({
-        user_id: user.id,
-        type: 'archive',
-        sort: 'time',
-        first: '100',
-      });
-      if (cursor) params.set('after', cursor);
-      const data = await json(
-        `https://api.twitch.tv/helix/videos?${params}`,
-        {
-          headers: { 'Client-ID': auth.clientId, Authorization: `Bearer ${auth.token}` },
-        },
-        fetcher,
-      );
-      if (!Array.isArray(data.data)) throw new Error('Twitch returned an invalid recording list.');
-      items = data.data.slice(0, 100);
-      next = data.pagination?.cursor;
-    } else {
-      const data = await gql(
-        'query VodSyncChannel($login: String!, $after: Cursor) { user(login: $login) { login videos(first: 30, after: $after, type: ARCHIVE, sort: TIME) { edges { cursor node { id title createdAt lengthSeconds broadcastType owner { login displayName } } } pageInfo { hasNextPage } } } }',
-        { login: channel, after: cursor },
-        fetcher,
-      );
-      if (!data?.user) throw new Error(`Twitch channel ${channel} was not found.`);
-      if (typeof data.user.login !== 'string' || data.user.login.toLowerCase() !== channel)
-        throw new Error('Twitch returned a different channel.');
-      const list = data.user.videos;
-      if (!Array.isArray(list?.edges))
-        throw new Error('Twitch returned an invalid recording list.');
-      items = list.edges.slice(0, 30).map((edge: any) => edge?.node);
-      next = list.pageInfo?.hasNextPage ? list.edges.at(-1)?.cursor : undefined;
-      if (list.pageInfo?.hasNextPage && !next)
-        throw new Error('Twitch did not provide the next recording page. Retry the lookup.');
+    try {
+      if (auth) {
+        const params = new URLSearchParams({
+          user_id: user.id,
+          type: 'archive',
+          sort: 'time',
+          first: '100',
+        });
+        if (cursor) params.set('after', cursor);
+        const data = await json(
+          `https://api.twitch.tv/helix/videos?${params}`,
+          {
+            headers: { 'Client-ID': auth.clientId, Authorization: `Bearer ${auth.token}` },
+          },
+          fetcher,
+        );
+        if (!Array.isArray(data.data))
+          throw new Error('Twitch returned an invalid recording list.');
+        items = data.data.slice(0, 100);
+        next = data.pagination?.cursor;
+      } else {
+        const data = await gql(
+          'query VodSyncChannel($login: String!, $after: Cursor) { user(login: $login) { login videos(first: 30, after: $after, type: ARCHIVE, sort: TIME) { edges { cursor node { id title createdAt lengthSeconds broadcastType owner { login displayName } } } pageInfo { hasNextPage } } } }',
+          { login: channel, after: cursor },
+          fetcher,
+        );
+        if (!data?.user) throw new Error(`Twitch channel ${channel} was not found.`);
+        if (typeof data.user.login !== 'string' || data.user.login.toLowerCase() !== channel)
+          throw new Error('Twitch returned a different channel.');
+        const list = data.user.videos;
+        if (!Array.isArray(list?.edges))
+          throw new Error('Twitch returned an invalid recording list.');
+        items = list.edges.slice(0, 30).map((edge: any) => edge?.node);
+        next = list.pageInfo?.hasNextPage ? list.edges.at(-1)?.cursor : undefined;
+        if (list.pageInfo?.hasNextPage && !next)
+          throw new Error('Twitch did not provide the next recording page. Retry the lookup.');
+      }
+    } catch (error) {
+      // Anonymous Twitch can refuse deeper pages; keep the newer matches already confirmed.
+      if (matches.length) break;
+      throw error;
     }
-    const matches: Vod[] = [];
+    let older = false;
     for (const v of items) {
       if (!v || typeof v.id !== 'string' || !/^\d+$/.test(v.id)) continue;
       if (
@@ -121,22 +139,28 @@ export async function resolveChannelTarget(
           correctionSeconds: 0,
           provenance: auth ? 'twitch-helix' : 'twitch-public',
         });
-        if (matchMoment(vod, momentMs).state === 'playing') matches.push(vod);
+        if (spans.some((span) => overlaps(vod, span))) matches.push(vod);
+        // Archives come newest first and a channel streams once at a time, so archives
+        // older than one that ended before every recording started cannot overlap them.
+        if (endMs(vod) <= earliest) older = true;
       } catch {
         /* Unusable archive metadata cannot establish a match. */
       }
     }
-    matches.sort((a, b) => startMs(b) - startMs(a));
-    if (matches[0])
-      return { vod: matches[0], offsetSeconds: matchMoment(matches[0], momentMs).offsetSeconds };
-    if (!next) break;
-    if (typeof next !== 'string' || next.length > 2048 || cursors.has(next))
+    if (older || !next) break;
+    if (typeof next !== 'string' || next.length > 2048 || cursors.has(next)) {
+      if (matches.length) break;
       throw new Error('Twitch repeated or returned an invalid recording page. Retry the lookup.');
+    }
     cursors.add(next);
     cursor = next;
   }
+  if (matches.length)
+    return [...new Map(matches.map((vod) => [vod.id, vod])).values()].sort(
+      (a, b) => startMs(a) - startMs(b),
+    );
   throw new Error(
-    `No available Twitch past broadcast for ${channel} covers ${new Date(momentMs).toISOString()}. Checked up to ${auth ? 1000 : 300} recent recordings; older, deleted, or unavailable VODs may be missing.`,
+    `No available Twitch past broadcast for ${channel} overlaps the session's recordings. Checked up to ${auth ? 1000 : 300} recent recordings; older, deleted, or unavailable VODs may be missing.`,
   );
 }
 // A live channel plays at its own live edge; the lookup only confirms the channel and

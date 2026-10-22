@@ -109,6 +109,25 @@ describe('Kick player lifecycle', () => {
     expect(callbacks.playing).toHaveBeenCalledOnce();
     player.destroy();
   });
+  it('starts native HLS at its offset before reporting ready', async () => {
+    const { video, player, callbacks } = setup(
+      Promise.resolve('https://stream.kick.com/test.m3u8'),
+    );
+    await Promise.resolve();
+    expect(video.src).toBe('https://stream.kick.com/test.m3u8');
+    let atReady: number | undefined;
+    callbacks.ready.mockImplementation(() => {
+      atReady = video.currentTime;
+    });
+    video.dispatchEvent(new Event('loadedmetadata'));
+    expect(callbacks.ready).toHaveBeenCalledOnce();
+    expect(atReady).toBe(100);
+    // A second metadata event (a reload of the same source) never moves it again.
+    video.currentTime = 150;
+    video.dispatchEvent(new Event('loadedmetadata'));
+    expect(video.currentTime).toBe(150);
+    player.destroy();
+  });
   it('seeks to an available frame without declaring the requested gap buffered', async () => {
     const { video, player } = setup(Promise.resolve('https://stream.kick.com/test.m3u8'));
     await Promise.resolve();
