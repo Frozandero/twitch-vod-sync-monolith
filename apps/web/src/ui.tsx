@@ -1,6 +1,9 @@
-import type { ReactNode } from 'react';
-import { ArrowLeft, ArrowRight } from 'lucide-react';
+import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { ArrowLeft, ArrowRight, Volume2, VolumeX } from 'lucide-react';
 import type { Platform } from '@vodsync/core';
+
+// How long a speaker button must be held to flip everyone else's sound.
+export const HOLD_MS = 500;
 
 export function Kbd({ children }: { children: ReactNode }) {
   return <kbd className="kbd">{children}</kbd>;
@@ -88,6 +91,99 @@ export function gripPosition(key: string, index: number, count: number): number 
   if (key === 'ArrowLeft' || key === 'ArrowUp') return index - 1;
   if (key === 'ArrowRight' || key === 'ArrowDown') return index + 1;
   return null;
+}
+
+// A player's speaker: press toggles its sound; holding it (pointer, Space or Enter) flips
+// everyone: a muted player becomes the only one with sound, an audible one the only one without.
+export function SoundButton({
+  name,
+  muted,
+  disabled,
+  onToggle,
+  onHold,
+}: {
+  name: string;
+  muted: boolean;
+  disabled?: boolean;
+  onToggle: () => void;
+  onHold: () => void;
+}) {
+  const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  // Set when a hold fired, so the release that follows doesn't also toggle. The next
+  // press clears it, since some browsers send no click after a long touch.
+  const held = useRef(false);
+  // A key released here must have been pressed here, not on a control that moved focus.
+  const keyed = useRef(false);
+  const hold = useRef(onHold);
+  hold.current = onHold;
+  const [pressing, setPressing] = useState(false);
+  useEffect(() => () => clearTimeout(timer.current), []);
+  useEffect(() => {
+    if (disabled) release();
+  }, [disabled]);
+  function press() {
+    clearTimeout(timer.current);
+    held.current = false;
+    setPressing(true);
+    timer.current = setTimeout(() => {
+      held.current = true;
+      setPressing(false);
+      hold.current();
+    }, HOLD_MS);
+  }
+  function release() {
+    clearTimeout(timer.current);
+    setPressing(false);
+  }
+  const activation = (event: KeyboardEvent) => event.key === ' ' || event.key === 'Enter';
+  return (
+    <button
+      className={`icon-btn sound-btn ${muted ? 'subtle' : 'on'} ${pressing ? 'is-holding' : ''}`}
+      disabled={disabled}
+      aria-label={`${muted ? 'Unmute' : 'Mute'} ${name}`}
+      title={
+        muted
+          ? `Unmute · hold to hear only ${name}`
+          : `Mute · hold to mute ${name} and unmute the rest`
+      }
+      onPointerDown={(event) => {
+        if (event.button === 0) press();
+      }}
+      onPointerUp={release}
+      onPointerLeave={release}
+      onPointerCancel={release}
+      onBlur={() => {
+        keyed.current = false;
+        release();
+      }}
+      // A long touch would otherwise open the browser's menu.
+      onContextMenu={(event) => event.preventDefault()}
+      onClick={() => {
+        if (held.current) held.current = false;
+        else onToggle();
+      }}
+      // Keys are handled here so a held Enter doesn't repeat clicks.
+      onKeyDown={(event) => {
+        if (!activation(event)) return;
+        event.preventDefault();
+        if (event.repeat) return;
+        keyed.current = true;
+        press();
+      }}
+      onKeyUp={(event) => {
+        if (!activation(event) || !keyed.current) return;
+        event.preventDefault();
+        keyed.current = false;
+        if (held.current) held.current = false;
+        else {
+          release();
+          onToggle();
+        }
+      }}
+    >
+      {muted ? <VolumeX size={15} /> : <Volume2 size={15} />}
+    </button>
+  );
 }
 
 // The Move row inside a player's header drawer: a keyboard and touch alternative to dragging.

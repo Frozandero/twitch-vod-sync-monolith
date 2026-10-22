@@ -774,10 +774,150 @@ button.tile-status:hover {
   background: var(--surface-sunken);
   color: var(--ink);
 }
+.tile-link {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+}
+.tile-copy {
+  width: 28px;
+  height: 28px;
+  color: var(--ink-subtle);
+}
 .tile-actions {
   flex: none;
   display: flex;
   align-items: center;
+}
+.tile-actions .icon-btn[aria-expanded='true'] {
+  background: var(--surface-sunken);
+  color: var(--ink);
+}
+/* Press toggles sound; a hold fills this bar before flipping everyone else. */
+.sound-btn {
+  position: relative;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+.sound-btn::after {
+  content: '';
+  position: absolute;
+  left: 7px;
+  right: 7px;
+  bottom: 3px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--accent);
+  transform: scaleX(0);
+  transform-origin: left;
+}
+/* Matches HOLD_MS in ui.tsx. */
+.sound-btn.is-holding::after {
+  animation: hold-fill 500ms linear forwards;
+}
+@keyframes hold-fill {
+  to {
+    transform: scaleX(1);
+  }
+}
+
+/* Timing replaces the status and links, opening leftward from its button. Narrow headers
+   shed the name and source name, the labels, the readout, the other buttons and Reset. */
+.tile-head {
+  container: tile-head / inline-size;
+}
+.tile-head.is-timing .tile-name {
+  min-width: 0;
+  /* Gives way before any timing control does. */
+  flex-shrink: 1000;
+}
+.tile-head .timing {
+  flex: 0 1 auto;
+  min-width: 0;
+  flex-wrap: nowrap;
+  gap: 10px;
+  margin-left: auto;
+  /* Room for focus rings; scrolls only when even the compact form can't fit. */
+  padding: 4px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  animation: timing-open var(--base) ease-out;
+}
+@keyframes timing-open {
+  from {
+    clip-path: inset(0 0 0 100%);
+    opacity: 0;
+  }
+}
+.tile-head .timing-group {
+  flex: none;
+}
+.tile-head .timing .field {
+  width: 84px;
+  height: 28px;
+}
+.tile-head .timing .offset-field {
+  width: 68px;
+}
+.tile-head .timing .step-btn,
+.tile-head .timing .icon-btn {
+  width: 28px;
+  height: 28px;
+}
+.tile-head .timing-drift {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@container tile-head (max-width: 720px) {
+  .timing-vs,
+  .is-timing .tile-name,
+  .is-timing .platform-mark {
+    display: none;
+  }
+}
+@container tile-head (max-width: 560px) {
+  .timing-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}
+@container tile-head (max-width: 520px) {
+  .timing-drift:not(.has-error) {
+    display: none;
+  }
+}
+@container tile-head (max-width: 500px) {
+  .is-timing .tile-actions > :not(:first-child) {
+    display: none;
+  }
+}
+/* A phone header can't fit the label beside five buttons; Timing still names the source clock. */
+@container tile-head (max-width: 400px) {
+  .tile-source {
+    display: none;
+  }
+}
+@container tile-head (max-width: 370px) {
+  .timing-reset {
+    display: none;
+  }
+}
+@container tile-head (max-width: 340px) {
+  .platform-mark {
+    display: none;
+  }
+  .tile-time {
+    padding: 0 2px;
+  }
 }
 .tile-frame {
   position: relative;
@@ -1318,6 +1458,22 @@ button.tile-status:hover {
   height: 24px;
   font-size: 12px;
 }
+.watch-mode .tile-head .tile-copy {
+  width: 22px;
+  height: 22px;
+}
+.watch-mode .tile-head .timing {
+  padding: 2px 4px;
+}
+.watch-mode .tile-head .timing .field,
+.watch-mode .tile-head .timing .step-btn,
+.watch-mode .tile-head .timing .icon-btn {
+  height: 24px;
+}
+.watch-mode .tile-head .timing .step-btn,
+.watch-mode .tile-head .timing .icon-btn {
+  width: 24px;
+}
 .watch-mode .tile-frame {
   flex: 1;
   aspect-ratio: auto;
@@ -1595,16 +1751,41 @@ button.tile-status:hover {
   }
   .tile-head {
     --tile-head: 48px;
-    gap: 6px;
-    padding: 0 0 0 12px;
+    gap: 4px;
+    padding: 0;
   }
-  /* Phones reorder through "Move to position" in the player menu. */
-  .tile-head .reorder-handle,
   .tile-time svg {
     display: none;
   }
+  /* Phones reorder by tapping the grip, which opens the position row. */
   .tile-head .icon-btn {
-    width: 40px;
+    width: 34px;
+  }
+  .tile-head .reorder-handle,
+  .tile-head .tile-copy {
+    width: 30px;
+  }
+  /* 16 px text keeps iOS from zooming into the fields. */
+  .tile-head .timing {
+    gap: 6px;
+    padding: 4px 2px;
+  }
+  .tile-head .timing-group {
+    gap: 2px;
+  }
+  .tile-head .timing .field {
+    width: 86px;
+    height: 36px;
+    padding: 0 4px;
+    font-size: 16px;
+  }
+  .tile-head .timing .offset-field {
+    width: 72px;
+  }
+  .tile-head .timing .step-btn,
+  .tile-head .timing .icon-btn {
+    width: 30px;
+    height: 36px;
   }
   .tile-status {
     max-width: 30%;

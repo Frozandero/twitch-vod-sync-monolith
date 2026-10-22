@@ -1,15 +1,13 @@
 import { useEffect, useRef, useState, type DragEventHandler } from 'react';
 import {
   ArrowUpRight,
+  Copy,
   GripVertical,
   LoaderCircle,
   Minimize2,
-  MoreHorizontal,
   Pause,
   Play,
   RotateCw,
-  Volume2,
-  VolumeX,
   X,
 } from 'lucide-react';
 import { channelUrl, liveKey, type LiveChannel } from '@vodsync/core';
@@ -18,12 +16,11 @@ import type { GridPosition } from './gridLayout';
 import { StatusSlot, type BarStatus } from './PlaybackBar';
 import { loadTwitchSdk, type TwitchEmbed } from './twitchSdk';
 import { useGridLayout } from './useGridLayout';
-import { Kbd, MoveControls, PlatformMark, gripPosition } from './ui';
+import { Kbd, MoveControls, PlatformMark, SoundButton, gripPosition } from './ui';
 
 // Live channels play at their own live edge: shared play, pause and mute, no timeline.
 export type LiveState =
   'loading' | 'live' | 'unverified' | 'paused' | 'offline' | 'blocked' | 'error';
-type Drawer = 'menu' | 'move';
 const platformName = (channel: LiveChannel) => (channel.platform === 'twitch' ? 'Twitch' : 'Kick');
 
 // Whether each channel is broadcasting now, refreshed every minute while the page is
@@ -92,7 +89,6 @@ function LivePlayer({
   playing,
   muted,
   online,
-  soloed,
   busy,
   onMute,
   onSolo,
@@ -106,10 +102,10 @@ function LivePlayer({
   muted: boolean;
   // From the status lookup: undefined until the first answer, null when it failed.
   online: boolean | null | undefined;
-  soloed: boolean;
   busy: boolean;
   onMute: (muted: boolean) => void;
-  onSolo: () => void;
+  // Holding the speaker: hear only this channel, or everyone except it.
+  onSolo: (mode: 'only' | 'except') => void;
   onCopy: (url: string) => void;
   onRemove: () => void;
   onState: (key: string, state: LiveState) => void;
@@ -121,12 +117,12 @@ function LivePlayer({
   const [twitchState, setTwitchState] = useState<LiveState>('loading');
   const [latency, setLatency] = useState<number | null>(null);
   const [attempt, setAttempt] = useState(0);
-  const [drawer, setDrawer] = useState<Drawer | null>(null);
+  // The position row, opened from the grip.
+  const [moving, setMoving] = useState(false);
   const host = useRef<HTMLDivElement>(null);
   const embed = useRef<TwitchEmbed | null>(null);
-  const moreButton = useRef<HTMLButtonElement>(null);
+  const grip = useRef<HTMLButtonElement>(null);
   const drawerNode = useRef<HTMLDivElement>(null);
-  const drawerTrigger = useRef<HTMLElement | null>(null);
   const playingRef = useRef(playing);
   playingRef.current = playing;
   const mutedRef = useRef(muted);
@@ -289,25 +285,16 @@ function LivePlayer({
     return () => clearInterval(timer);
   }, [kick, twitchState]);
 
-  function toggleDrawer(kind: Drawer, trigger: HTMLElement) {
-    drawerTrigger.current = trigger;
-    setDrawer((open) => (open === kind ? null : kind));
-  }
   function closeDrawer() {
-    setDrawer(null);
-    requestAnimationFrame(() => {
-      const trigger = drawerTrigger.current?.isConnected
-        ? drawerTrigger.current
-        : moreButton.current;
-      trigger?.focus({ preventScroll: true });
-    });
+    setMoving(false);
+    requestAnimationFrame(() => grip.current?.focus({ preventScroll: true }));
   }
   useEffect(() => {
-    if (!drawer) return;
+    if (!moving) return;
     drawerNode.current
       ?.querySelector<HTMLElement>('button:not(:disabled), select')
       ?.focus({ preventScroll: true });
-  }, [drawer]);
+  }, [moving]);
 
   const chip =
     state === 'loading'
@@ -340,7 +327,7 @@ function LivePlayer({
                 ? {
                     text: 'player problem',
                     tone: 'signal',
-                    title: 'Reload the player from its ⋯ menu.',
+                    title: 'Reload the player with the button in its header.',
                   }
                 : null;
   return (
@@ -358,16 +345,17 @@ function LivePlayer({
     >
       <div className="tile-head">
         <button
+          ref={grip}
           className="icon-btn reorder-handle"
           aria-label={`Reorder ${channel.name}, position ${order.index + 1} of ${order.count}`}
-          aria-expanded={drawer === 'move'}
-          aria-controls={drawer ? drawerId : undefined}
+          aria-expanded={moving}
+          aria-controls={moving ? drawerId : undefined}
           title="Drag to reorder, or click to choose a position. Arrow keys move; Home/End move to first/last."
           disabled={order.disabled}
           draggable={!order.disabled}
           onDragStart={order.onStart}
           onDragEnd={order.onEnd}
-          onClick={(event) => toggleDrawer('move', event.currentTarget)}
+          onClick={() => setMoving((open) => !open)}
           onKeyDown={(event) => {
             const position = gripPosition(event.key, order.index, order.count);
             if (position === null) return;
@@ -388,52 +376,71 @@ function LivePlayer({
             <span>{chip.text}</span>
           </span>
         )}
-        <a
-          className="tile-time"
-          href={url}
-          target="_blank"
-          rel="noreferrer"
-          aria-label={`Open ${channel.name} on ${platformName(channel)}`}
-          title={
-            latency === null
-              ? `Open on ${platformName(channel)}`
-              : `${latency.toFixed(1)} s behind the broadcaster · open on ${platformName(channel)}`
-          }
-        >
-          {state === 'live' && <i className="live-dot" aria-hidden="true" />}
-          <span>
-            {state === 'live' ? (latency === null ? 'live' : `${latency.toFixed(1)} s`) : 'channel'}
-          </span>
-          <ArrowUpRight size={12} aria-hidden="true" />
-        </a>
+        <span className="tile-link">
+          <a
+            className="tile-time"
+            href={url}
+            target="_blank"
+            rel="noreferrer"
+            aria-label={`Open ${channel.name} on ${platformName(channel)}`}
+            title={
+              latency === null
+                ? `Open on ${platformName(channel)}`
+                : `${latency.toFixed(1)} s behind the broadcaster · open on ${platformName(channel)}`
+            }
+          >
+            {state === 'live' && <i className="live-dot" aria-hidden="true" />}
+            <span>
+              {state === 'live'
+                ? latency === null
+                  ? 'live'
+                  : `${latency.toFixed(1)} s`
+                : 'channel'}
+            </span>
+            <ArrowUpRight size={12} aria-hidden="true" />
+          </a>
+          <button
+            className="icon-btn tile-copy"
+            aria-label={`Copy ${channel.name} channel link`}
+            title="Copy channel link"
+            onClick={() => onCopy(url)}
+          >
+            <Copy size={13} />
+          </button>
+        </span>
         <div className="tile-actions">
           <button
-            className={`icon-btn ${muted ? 'subtle' : 'on'}`}
-            aria-label={`${muted ? 'Unmute' : 'Mute'} ${channel.name}`}
-            title={muted ? 'Unmute' : 'Mute'}
-            onClick={() => onMute(!muted)}
+            className="icon-btn"
+            aria-label={`Reload ${channel.name} player`}
+            title="Reload player"
+            onClick={() => setAttempt((n) => n + 1)}
           >
-            {muted ? <VolumeX size={15} /> : <Volume2 size={15} />}
+            <RotateCw size={15} />
           </button>
+          <SoundButton
+            name={channel.name}
+            muted={muted}
+            onToggle={() => onMute(!muted)}
+            onHold={() => onSolo(muted ? 'only' : 'except')}
+          />
           <button
-            ref={moreButton}
-            className={`icon-btn ${drawer === 'menu' ? 'on' : ''}`}
-            aria-label={`More for ${channel.name}`}
-            aria-expanded={drawer === 'menu'}
-            aria-controls={drawer ? drawerId : undefined}
-            onClick={(event) => toggleDrawer('menu', event.currentTarget)}
+            className="icon-btn tile-close"
+            aria-label={`Close ${channel.name}`}
+            title="Close"
+            disabled={busy}
+            onClick={onRemove}
           >
-            <MoreHorizontal size={16} />
+            <X size={16} />
           </button>
         </div>
       </div>
-      {drawer && (
+      {moving && (
         <div
           ref={drawerNode}
           className="tile-drawer"
           id={drawerId}
           role="group"
-          aria-label={`${channel.name} ${drawer === 'menu' ? 'actions' : 'move'}`}
+          aria-label={`${channel.name} move`}
           onKeyDown={(event) => {
             if (event.key !== 'Escape') return;
             event.preventDefault();
@@ -442,61 +449,17 @@ function LivePlayer({
           }}
         >
           <div className="drawer-body">
-            {drawer === 'menu' ? (
-              <>
-                <button
-                  className="drawer-btn"
-                  disabled={soloed}
-                  onClick={() => {
-                    onSolo();
-                    closeDrawer();
-                  }}
-                >
-                  Listen to {channel.name} only
-                </button>
-                <button
-                  className="drawer-btn"
-                  onClick={() => {
-                    onCopy(url);
-                    closeDrawer();
-                  }}
-                >
-                  Copy channel link
-                </button>
-                <button
-                  className="drawer-btn"
-                  disabled={order.disabled}
-                  onClick={() => setDrawer('move')}
-                >
-                  Move to position
-                </button>
-                <button
-                  className="drawer-btn"
-                  onClick={() => {
-                    setAttempt((n) => n + 1);
-                    closeDrawer();
-                  }}
-                >
-                  <RotateCw size={13} aria-hidden="true" />
-                  Reload player
-                </button>
-                <button className="drawer-btn danger" disabled={busy} onClick={onRemove}>
-                  Close {channel.name}
-                </button>
-              </>
-            ) : (
-              <MoveControls
-                name={channel.name}
-                index={order.index}
-                count={order.count}
-                disabled={order.disabled}
-                onMove={order.onMove}
-              />
-            )}
+            <MoveControls
+              name={channel.name}
+              index={order.index}
+              count={order.count}
+              disabled={order.disabled}
+              onMove={order.onMove}
+            />
           </div>
           <button
             className="icon-btn small"
-            aria-label={`Close ${channel.name} ${drawer === 'menu' ? 'actions' : 'move'}`}
+            aria-label={`Close ${channel.name} move`}
             onClick={closeDrawer}
           >
             <X size={14} />
@@ -538,7 +501,6 @@ export function LiveGrid({
   playing,
   mutedKeys,
   online,
-  soloKey,
   busy,
   onMute,
   onSolo,
@@ -551,10 +513,9 @@ export function LiveGrid({
   playing: boolean;
   mutedKeys: Set<string>;
   online: Record<string, boolean | null>;
-  soloKey: string;
   busy: boolean;
   onMute: (channel: LiveChannel, muted: boolean) => void;
-  onSolo: (channel: LiveChannel) => void;
+  onSolo: (channel: LiveChannel, mode: 'only' | 'except') => void;
   onCopy: (channel: LiveChannel, url: string) => void;
   onRemove: (channel: LiveChannel) => void;
   onReorder: (key: string, position: number) => void;
@@ -585,10 +546,9 @@ export function LiveGrid({
               playing={playing}
               muted={mutedKeys.has(key)}
               online={online[key]}
-              soloed={soloKey === key}
               busy={busy}
               onMute={(muted) => onMute(channel, muted)}
-              onSolo={() => onSolo(channel)}
+              onSolo={(mode) => onSolo(channel, mode)}
               onCopy={(url) => onCopy(channel, url)}
               onRemove={() => onRemove(channel)}
               onState={onState}

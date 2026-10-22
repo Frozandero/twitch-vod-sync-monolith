@@ -1,13 +1,12 @@
 import { useEffect, useRef, useState, type DragEventHandler } from 'react';
 import {
   ArrowUpRight,
+  Copy,
   GripVertical,
   LoaderCircle,
-  MoreHorizontal,
   RefreshCw,
   RotateCw,
-  Volume2,
-  VolumeX,
+  Timer,
   X,
 } from 'lucide-react';
 import {
@@ -22,7 +21,7 @@ import {
 import { DRIFT_LIMIT } from './syncSummary';
 import { clock as wallClock, formatDelta } from './timeFormat';
 import { TimingControls } from './TimingControls';
-import { MoveControls, PlatformMark, gripPosition } from './ui';
+import { MoveControls, PlatformMark, SoundButton, gripPosition } from './ui';
 import { createPlayerClock } from './playerClock';
 import { createVodGuard, hasSound, type PlaybackSnapshot, type StopReason } from './playback';
 import { createSeekPreparation, seekPosition, type SeekState } from './seekBarrier';
@@ -40,7 +39,7 @@ function shortError(message: string) {
   if (/not ready to seek/i.test(message)) return 'not ready';
   return 'player problem';
 }
-type Drawer = 'menu' | 'timing' | 'move' | 'error';
+type Drawer = 'move' | 'error';
 
 export type PlayerHandle = {
   getSnapshot(): PlaybackSnapshot;
@@ -77,13 +76,13 @@ type Props = {
   sourceName: string;
   // The recording that currently plays sound, or '' to follow the source.
   audioKey: string;
-  soloed: boolean;
   // The viewer's speaker choice for this streamer, kept across seeks; undefined follows audioKey.
   sound: boolean | undefined;
   onSound: (on: boolean) => void;
   busy: boolean;
   localTime: boolean;
-  onSolo: () => void;
+  // Holding the speaker: hear only this streamer, or everyone except them.
+  onSolo: (mode: 'only' | 'except') => void;
   onSeekTo: (offsetSeconds: number, correctionSeconds?: number) => void;
   onJump: (moment: number) => void;
   onCorrect: (seconds: number) => void;
@@ -116,7 +115,6 @@ export function Player({
   drift,
   sourceName,
   audioKey,
-  soloed,
   sound,
   onSound,
   busy,
@@ -128,10 +126,11 @@ export function Player({
   onCopy,
   order,
 }: Props) {
-  const moreButton = useRef<HTMLButtonElement>(null);
+  const timingButton = useRef<HTMLButtonElement>(null);
   const drawerNode = useRef<HTMLDivElement>(null);
   const drawerTrigger = useRef<HTMLElement | null>(null);
   const [drawer, setDrawer] = useState<Drawer | null>(null);
+  const [timing, setTiming] = useState(false);
   const container = useRef<HTMLDivElement>(null);
   const player = useRef<Omit<PlayerHandle, 'getSnapshot'> | null>(null);
   const clock = useRef<ReturnType<typeof createPlayerClock> | null>(null);
@@ -152,21 +151,26 @@ export function Player({
   const drawerId = `drawer-${vod.platform}-${vod.id}`;
   function toggleDrawer(kind: Drawer, trigger: HTMLElement) {
     drawerTrigger.current = trigger;
-    setDrawer((open) => (open === kind || (kind === 'menu' && open === 'timing') ? null : kind));
+    setDrawer((open) => (open === kind ? null : kind));
   }
   function closeDrawer() {
     setDrawer(null);
-    // The trigger may be gone (a cleared error label); fall back to the ⋯ button.
+    // The trigger may be gone (a cleared error label); fall back to the Timing button.
     requestAnimationFrame(() => {
       const trigger = drawerTrigger.current?.isConnected
         ? drawerTrigger.current
-        : moreButton.current;
+        : timingButton.current;
       trigger?.focus({ preventScroll: true });
     });
   }
+  function closeTiming() {
+    setTiming(false);
+    // Its button stays put, so focus can move before the controls unmount.
+    timingButton.current?.focus({ preventScroll: true });
+  }
   // Move focus into a drawer as it opens or changes view.
   useEffect(() => {
-    if (!drawer || drawer === 'timing') return;
+    if (!drawer) return;
     drawerNode.current
       ?.querySelector<HTMLElement>('button:not(:disabled), select, input')
       ?.focus({ preventScroll: true });
@@ -178,7 +182,7 @@ export function Player({
     if (error || drawer !== 'error') return;
     setDrawer(null);
     const lost = !document.activeElement || document.activeElement === document.body;
-    if (focusInDrawer.current && lost) moreButton.current?.focus({ preventScroll: true });
+    if (focusInDrawer.current && lost) timingButton.current?.focus({ preventScroll: true });
     focusInDrawer.current = false;
   }, [error, drawer]);
   const openDrawer = drawer === 'error' && !error ? null : drawer;
@@ -753,7 +757,7 @@ export function Player({
       onDragOver={order.onOver}
       onDrop={order.onDrop}
     >
-      <div className="tile-head">
+      <div className={`tile-head ${timing ? 'is-timing' : ''}`}>
         <button
           className="icon-btn reorder-handle"
           aria-label={`Reorder ${vod.channel}, position ${order.index + 1} of ${order.count}`}
@@ -778,63 +782,104 @@ export function Player({
         <strong className="tile-name" title={vod.title}>
           {vod.channel}
         </strong>
-        {part.count > 1 && (
-          <span
-            className="tile-part mono"
-            title={`Recording ${part.index + 1} of ${part.count} from ${vod.channel}. The player moves to the one at the selected moment.`}
-          >
-            {part.index + 1}/{part.count}
-          </span>
-        )}
-        {source && (
-          <span className="tile-source" title="Reference clock and audio for the session">
-            source
-          </span>
-        )}
-        <span className="tile-spacer" />
         {/* Announce player problems once; the visible label stays short. */}
         <span className="sr-only" role="status">
           {error && `${vod.channel}: ${error}`}
         </span>
-        {status?.detail ? (
-          <button
-            type="button"
-            className={`tile-status ${status.tone}`}
-            aria-expanded={openDrawer === 'error'}
-            aria-controls={openDrawer ? drawerId : undefined}
-            aria-label={`${vod.channel}: ${error}`}
-            onClick={(event) => toggleDrawer('error', event.currentTarget)}
-          >
-            <span>{status.text}</span>
-          </button>
+        {/* Timing opens leftward from its button, in place of the status and links. */}
+        {timing ? (
+          <TimingControls
+            vod={vod}
+            moment={moment}
+            drift={drift}
+            source={source}
+            sourceName={sourceName}
+            onSeek={onSeekTo}
+            onCorrect={onCorrect}
+            onDone={closeTiming}
+          />
         ) : (
-          status && (
-            <span className={`tile-status ${status.tone}`} title={status.title}>
-              {status.spin && <LoaderCircle className="spin" size={12} aria-hidden="true" />}
-              <span>{status.text}</span>
+          <>
+            {part.count > 1 && (
+              <span
+                className="tile-part mono"
+                title={`Recording ${part.index + 1} of ${part.count} from ${vod.channel}. The player moves to the one at the selected moment.`}
+              >
+                {part.index + 1}/{part.count}
+              </span>
+            )}
+            {source && (
+              <span className="tile-source" title="Reference clock and audio for the session">
+                source
+              </span>
+            )}
+            <span className="tile-spacer" />
+            {status?.detail ? (
+              <button
+                type="button"
+                className={`tile-status ${status.tone}`}
+                aria-expanded={openDrawer === 'error'}
+                aria-controls={openDrawer ? drawerId : undefined}
+                aria-label={`${vod.channel}: ${error}`}
+                onClick={(event) => toggleDrawer('error', event.currentTarget)}
+              >
+                <span>{status.text}</span>
+              </button>
+            ) : (
+              status && (
+                <span className={`tile-status ${status.tone}`} title={status.title}>
+                  {status.spin && <LoaderCircle className="spin" size={12} aria-hidden="true" />}
+                  <span>{status.text}</span>
+                </span>
+              )
+            )}
+            <span className="tile-link">
+              <a
+                className="tile-time"
+                href={link}
+                target="_blank"
+                rel="noreferrer"
+                aria-label={
+                  match.state === 'playing' || external
+                    ? `Open ${vod.channel} on ${platformName} at ${formatTime(linkOffset)}`
+                    : `Open ${vod.channel} VOD ${match.state === 'before' ? 'start' : 'end'} on ${platformName} — ${matchDescription(match)}`
+                }
+                title={
+                  match.state === 'playing' || external
+                    ? `Open on ${platformName} at ${formatTime(linkOffset)}`
+                    : `Open VOD ${match.state === 'before' ? 'start' : 'end'} · ${matchDescription(match)}`
+                }
+              >
+                <time>{time}</time>
+                <ArrowUpRight size={12} aria-hidden="true" />
+              </a>
+              <button
+                className="icon-btn tile-copy"
+                aria-label={`Copy ${vod.channel} timestamp link`}
+                title="Copy timestamp link"
+                onClick={() => onCopy(link)}
+              >
+                <Copy size={13} />
+              </button>
             </span>
-          )
+          </>
         )}
-        <a
-          className="tile-time"
-          href={link}
-          target="_blank"
-          rel="noreferrer"
-          aria-label={
-            match.state === 'playing' || external
-              ? `Open ${vod.channel} on ${platformName} at ${formatTime(linkOffset)}`
-              : `Open ${vod.channel} VOD ${match.state === 'before' ? 'start' : 'end'} on ${platformName} — ${matchDescription(match)}`
-          }
-          title={
-            match.state === 'playing' || external
-              ? `Open on ${platformName} at ${formatTime(linkOffset)}`
-              : `Open VOD ${match.state === 'before' ? 'start' : 'end'} · ${matchDescription(match)}`
-          }
-        >
-          <time>{time}</time>
-          <ArrowUpRight size={12} aria-hidden="true" />
-        </a>
         <div className="tile-actions">
+          <button
+            ref={timingButton}
+            className="icon-btn"
+            aria-label={`Timing for ${vod.channel}`}
+            aria-expanded={timing}
+            title={
+              busy && !timing
+                ? 'Wait for the recordings being added'
+                : 'Timing: jump everyone to a timestamp, or adjust this offset'
+            }
+            disabled={busy && !timing}
+            onClick={() => (timing ? closeTiming() : setTiming(true))}
+          >
+            <Timer size={15} />
+          </button>
           {!external && (
             <>
               <button
@@ -850,32 +895,36 @@ export function Player({
               >
                 <RefreshCw size={15} />
               </button>
-              <button
-                className={`icon-btn ${muted ? 'subtle' : 'on'}`}
+              <SoundButton
+                name={vod.channel}
+                muted={muted}
                 disabled={!ready || holding}
-                aria-label={`${muted ? 'Unmute' : 'Mute'} ${vod.channel}`}
-                title={muted ? 'Unmute' : 'Mute'}
-                onClick={() => {
+                onToggle={() => {
                   player.current?.setMuted(!muted);
                   forceMuted.current = false;
                   setError('');
                   setMuted(!muted);
                   onSound(muted);
                 }}
-              >
-                {muted ? <VolumeX size={15} /> : <Volume2 size={15} />}
-              </button>
+                onHold={() => {
+                  // A hold that gives this player sound overrides a muted retry, like a press.
+                  if (muted) {
+                    forceMuted.current = false;
+                    setError('');
+                  }
+                  onSolo(muted ? 'only' : 'except');
+                }}
+              />
             </>
           )}
           <button
-            ref={moreButton}
-            className={`icon-btn ${drawer === 'menu' || drawer === 'timing' ? 'on' : ''}`}
-            aria-label={`More for ${vod.channel}`}
-            aria-expanded={drawer === 'menu' || drawer === 'timing'}
-            aria-controls={openDrawer ? drawerId : undefined}
-            onClick={(event) => toggleDrawer('menu', event.currentTarget)}
+            className="icon-btn tile-close"
+            aria-label={`Close ${vod.channel}${part.count > 1 ? ` and its ${part.count} recordings` : ''}`}
+            title={part.count > 1 ? `Close · ${part.count} recordings` : 'Close'}
+            disabled={busy}
+            onClick={onRemove}
           >
-            <MoreHorizontal size={16} />
+            <X size={16} />
           </button>
         </div>
       </div>
@@ -886,7 +935,7 @@ export function Player({
           className="tile-drawer"
           id={drawerId}
           role="group"
-          aria-label={`${vod.channel} ${drawer === 'menu' ? 'actions' : drawer}`}
+          aria-label={`${vod.channel} ${drawer}`}
           onFocus={() => (focusInDrawer.current = true)}
           onBlur={(event) => {
             if (!event.currentTarget.contains(event.relatedTarget)) focusInDrawer.current = false;
@@ -899,60 +948,6 @@ export function Player({
           }}
         >
           <div className="drawer-body">
-            {drawer === 'menu' && (
-              <>
-                <button
-                  className="drawer-btn"
-                  disabled={busy}
-                  title={busy ? 'Wait for the recordings being added' : undefined}
-                  onClick={() => setDrawer('timing')}
-                >
-                  Timing
-                </button>
-                <button
-                  className="drawer-btn"
-                  disabled={external || !ready || soloed}
-                  onClick={() => {
-                    onSolo();
-                    closeDrawer();
-                  }}
-                >
-                  Listen to {vod.channel} only
-                </button>
-                <button
-                  className="drawer-btn"
-                  onClick={() => {
-                    onCopy(link);
-                    closeDrawer();
-                  }}
-                >
-                  Copy timestamp link
-                </button>
-                <button
-                  className="drawer-btn"
-                  disabled={order.disabled}
-                  onClick={() => setDrawer('move')}
-                >
-                  Move to position
-                </button>
-                <button className="drawer-btn danger" disabled={busy} onClick={onRemove}>
-                  Close {vod.channel}
-                  {part.count > 1 && ` · ${part.count} recordings`}
-                </button>
-              </>
-            )}
-            {drawer === 'timing' && (
-              <TimingControls
-                vod={vod}
-                moment={moment}
-                drift={drift}
-                source={source}
-                sourceName={sourceName}
-                onSeek={onSeekTo}
-                onCorrect={onCorrect}
-                onDone={closeDrawer}
-              />
-            )}
             {drawer === 'move' && (
               <MoveControls
                 name={vod.channel}
@@ -981,7 +976,7 @@ export function Player({
           </div>
           <button
             className="icon-btn small"
-            aria-label={`Close ${vod.channel} ${drawer === 'menu' ? 'actions' : drawer}`}
+            aria-label={`Close ${vod.channel} ${drawer}`}
             onClick={closeDrawer}
           >
             <X size={14} />

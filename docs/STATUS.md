@@ -4,6 +4,19 @@ Last updated: 2026-10-22.
 
 This file records actual checks and their limits. A passing build does not prove third-party playback is available.
 
+## Header icons instead of the ⋯ row — 2026-10-22
+
+- The owner asked for every player action as a header icon. The ⋯ button and its row are gone from recording and live tiles. A copy button sits beside the header time. On the right are Timing, Sync, the speaker and Close (✕); live tiles have Reload in place of Timing and Sync. Move to position is no longer an action: the grip's own row (click or tap) is the touch and keyboard alternative to dragging, so phones now show the grip. Timing replaces the status and links inside the header, opening leftward from its button. Holding a speaker for 500 ms flips everyone else: a muted one becomes the only audible player (the old Listen to … only), and an audible one becomes the only muted player.
+- `npm run check` passed: TypeScript, 251 tests, and the production build. Prettier is clean.
+- Simulated (demo) recordings in the built-in browser, four lanes:
+  - At 1440×900 (2×2, 689 px headers), Timing fit without scrolling, showing labels and the "Source clock" readout. The name gave way first. Escape and Seek everyone closed it and returned focus to its button. Two + clicks and one `[` saved a +0.1 s correction, which Timing showed again on reopening. Jump to 1:00:00 moved the shared clock to 18:00:00.
+  - Holding the speaker, by pointer and by Space or Enter, flipped the sound both ways; the bar showed "Listening to hasanabi only" and then "Muted hasanabi, unmuted the rest". Short presses still toggled one player, and Space didn't reach Play all.
+  - Headers fit at 375, 360 and 320 px with no page overflow. Below 400 px the source label is hidden, and below 340 px so is the platform mark. Open Timing fit at 375 and 360 px (Reset hidden from 370 px). At 320 px it scrolls 16 px. Watch mode fit Timing in the 30 px header.
+- In a live session of `twitch/xqc`, `kick/aikobliss` and `twitch/summit1g` (all offline at the time), hold and tap behaved the same. The grip opened the position row, and Escape closed it.
+- Known limits:
+  - The pane wasn't drawing frames, so `requestAnimationFrame` never ran. Focus moving to a neighbour's Close after closing a live channel wasn't observed; its selector was checked.
+  - Not verified: real Twitch or Kick audio, live embeds while playing, and physical phones, including iOS long-press handling.
+
 ## Every overlapping VOD per streamer, one lane per streamer — 2026-10-22
 
 - Report: in a session of xQc's Twitch VOD `2907037919` and aikobliss's Kick VOD `01a15fd9-…`, `kick/aikobliss` found only the first of her two VODs that overlap xQc's broadcast. The lookup stopped at the one archive covering the selected moment ([research note](RESEARCH.md#several-recordings-per-broadcast-window--observed-2026-10-22)).

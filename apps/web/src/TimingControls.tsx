@@ -10,8 +10,8 @@ const signed = (seconds: number) =>
 const parseOffset = (text: string) =>
   Number(text.replace(/−/g, '-').replace(/[^\d.+-]/g, '') || NaN);
 
-// Timing lives in the player's header drawer: Twitch pauses an embed that anything covers.
-// Fixed offsets apply after the stepper settles, so a run of nudges lines up once.
+// Timing opens inside the player's header, left of its button: Twitch pauses an embed that
+// anything covers. Fixed offsets apply after the stepper settles, so a run of nudges lines up once.
 export function TimingControls({
   vod,
   moment,
@@ -52,8 +52,9 @@ export function TimingControls({
     correct.current(value);
   }
   useEffect(() => {
+    jump.current?.focus({ preventScroll: true });
     jump.current?.select();
-    // Closing the drawer applies a nudge that hasn't settled yet.
+    // Closing timing applies a nudge that hasn't settled yet.
     return () => flush();
   }, []);
   function apply(next: number, now = false) {
@@ -72,13 +73,26 @@ export function TimingControls({
   }
   const step = (direction: 1 | -1, large: boolean) =>
     apply(offsetRef.current + direction * (large ? 1 : 0.1));
+  const driftText = error
+    ? error
+    : source
+      ? 'Source clock'
+      : drift === null
+        ? 'Waiting for a verified clock'
+        : `${formatDelta(drift)} vs ${sourceName}`;
   return (
     <div
       className="timing"
+      role="group"
+      aria-label={`${vod.channel} timing`}
       onKeyDown={(event) => {
         if (event.key === '[' || event.key === ']') {
           event.preventDefault();
           step(event.key === ']' ? 1 : -1, event.shiftKey);
+        } else if (event.key === 'Escape') {
+          event.preventDefault();
+          event.stopPropagation();
+          onDone();
         }
       }}
     >
@@ -100,7 +114,9 @@ export function TimingControls({
           }
         }}
       >
-        <label htmlFor={`jump-${vod.id}`}>Jump to</label>
+        <label className="timing-label" htmlFor={`jump-${vod.id}`}>
+          Jump to
+        </label>
         <input
           ref={jump}
           id={`jump-${vod.id}`}
@@ -123,6 +139,7 @@ export function TimingControls({
       <div className="timing-group" role="group" aria-labelledby={`offset-${vod.id}`}>
         <span
           id={`offset-${vod.id}`}
+          className="timing-label"
           title="Positive starts this recording later. Shift steps 1 s; [ and ] nudge."
         >
           Offset
@@ -158,7 +175,7 @@ export function TimingControls({
           <Plus size={13} />
         </button>
         <button
-          className="icon-btn"
+          className="icon-btn timing-reset"
           aria-label="Reset offset to 0"
           title="Reset to 0"
           disabled={offset === 0}
@@ -167,8 +184,10 @@ export function TimingControls({
           <RotateCcw size={14} />
         </button>
       </div>
+      {/* Narrow headers drop the source name, then the readout unless it holds an error. */}
       <span
-        className={`timing-drift ${drift !== null && Math.abs(drift) > DRIFT_LIMIT ? 'drifted' : drift !== null ? 'aligned' : ''}`}
+        className={`timing-drift ${error ? 'has-error' : drift !== null && Math.abs(drift) > DRIFT_LIMIT ? 'drifted' : drift !== null ? 'aligned' : ''}`}
+        title={driftText}
       >
         {error ? (
           <span className="signal" role="alert">
@@ -177,10 +196,11 @@ export function TimingControls({
         ) : source ? (
           'Source clock'
         ) : drift === null ? (
-          'Waiting for a verified clock'
+          'Not verified'
         ) : (
           <>
-            <span className="mono">{formatDelta(drift)}</span> vs {sourceName}
+            <span className="mono">{formatDelta(drift)}</span>
+            <span className="timing-vs"> vs {sourceName}</span>
           </>
         )}
       </span>

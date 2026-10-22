@@ -715,7 +715,7 @@ export default function App() {
     requestAnimationFrame(() =>
       document
         .querySelector<HTMLElement>(
-          `[data-live-key="${CSS.escape(liveKey(neighbour))}"] [aria-label^="More for"]`,
+          `[data-live-key="${CSS.escape(liveKey(neighbour))}"] .tile-close`,
         )
         ?.focus({ preventScroll: true }),
     );
@@ -1538,16 +1538,22 @@ export default function App() {
             playing={livePlaying}
             mutedKeys={mutedKeys}
             online={liveOnline}
-            soloKey={liveSolo}
             busy={busy}
             onMute={(channel, muted) => {
               setLiveSolo('');
               setLiveSound((current) => ({ ...current, [liveKey(channel)]: !muted }));
             }}
-            onSolo={(channel) => {
-              setLiveSolo(liveKey(channel));
-              setLiveSound(Object.fromEntries(live.map((c) => [liveKey(c), c === channel])));
-              showFlash(`Listening to ${channel.name} only`);
+            onSolo={(channel, mode) => {
+              const only = mode === 'only';
+              setLiveSolo(only ? liveKey(channel) : '');
+              setLiveSound(
+                Object.fromEntries(live.map((c) => [liveKey(c), (c === channel) === only])),
+              );
+              showFlash(
+                only
+                  ? `Listening to ${channel.name} only`
+                  : `Muted ${channel.name}, unmuted the rest`,
+              );
             }}
             onCopy={(channel, url) => void copy(url, `${channel.name} channel link copied`)}
             onRemove={removeLive}
@@ -1607,15 +1613,21 @@ export default function App() {
                   drift={driftSeconds(vod, moment, playbackStates[vodKey(vod)])}
                   sourceName={source?.channel ?? 'the source'}
                   audioKey={audibleKey}
-                  soloed={audioKey === lane.key}
                   sound={sound[lane.key]}
                   onSound={(on) => setSound((current) => ({ ...current, [lane.key]: on }))}
                   busy={busy}
                   localTime={localTime}
-                  onSolo={() => {
-                    setAudioKey(lane.key);
-                    setSound({});
-                    showFlash(`Listening to ${vod.channel} only`);
+                  onSolo={(mode) => {
+                    if (mode === 'only') {
+                      setAudioKey(lane.key);
+                      setSound({});
+                      showFlash(`Listening to ${vod.channel} only`);
+                      return;
+                    }
+                    // Everyone else is set by hand, so it holds like any speaker choice.
+                    setAudioKey('');
+                    setSound(Object.fromEntries(lanes.map((l) => [l.key, l.key !== lane.key])));
+                    showFlash(`Muted ${vod.channel}, unmuted the rest`);
                   }}
                   onSeekTo={(offset, correction) => {
                     // A just-flushed offset hasn't reached state yet; seek with it anyway.
