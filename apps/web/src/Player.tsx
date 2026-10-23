@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type DragEventHandler } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type DragEventHandler } from 'react';
 import {
   ArrowUpRight,
   Copy,
@@ -163,11 +163,19 @@ export function Player({
       trigger?.focus({ preventScroll: true });
     });
   }
+  // The Timing button moves into the open controls and back, so focus follows it.
+  const refocusTiming = useRef(false);
   function closeTiming() {
-    setTiming(false);
-    // Its button stays put, so focus can move before the controls unmount.
+    // Focusing first applies an offset typed but not entered, through its blur.
     timingButton.current?.focus({ preventScroll: true });
+    refocusTiming.current = true;
+    setTiming(false);
   }
+  useLayoutEffect(() => {
+    if (timing || !refocusTiming.current) return;
+    refocusTiming.current = false;
+    timingButton.current?.focus({ preventScroll: true });
+  }, [timing]);
   // Move focus into a drawer as it opens or changes view.
   useEffect(() => {
     if (!drawer) return;
@@ -744,6 +752,23 @@ export function Player({
               run: () => onJump(end - Math.min(60000, (vod.durationSeconds * 1000) / 2)),
             }
       : null;
+  const timingToggle = (
+    <button
+      ref={timingButton}
+      className="icon-btn timing-toggle"
+      aria-label={`Timing for ${vod.channel}`}
+      aria-expanded={timing}
+      title={
+        busy && !timing
+          ? 'Wait for the recordings being added'
+          : 'Timing: jump everyone to a timestamp, or adjust this offset'
+      }
+      disabled={busy && !timing}
+      onClick={() => (timing ? closeTiming() : setTiming(true))}
+    >
+      <Timer size={15} />
+    </button>
+  );
   return (
     <article
       className={`tile ${source ? 'is-source' : ''} ${order.dragging ? 'is-dragging' : ''} ${order.target ? 'is-drop-target' : ''}`}
@@ -786,7 +811,8 @@ export function Player({
         <span className="sr-only" role="status">
           {error && `${vod.channel}: ${error}`}
         </span>
-        {/* Timing opens leftward from its button, in place of the status and links. */}
+        {/* Timing sits left of the time: opening it turns the time into the jump field in place
+            and opens the offset controls leftward. */}
         {timing ? (
           <TimingControls
             vod={vod}
@@ -794,6 +820,7 @@ export function Player({
             drift={drift}
             source={source}
             sourceName={sourceName}
+            toggle={timingToggle}
             onSeek={onSeekTo}
             onCorrect={onCorrect}
             onDone={closeTiming}
@@ -833,6 +860,7 @@ export function Player({
                 </span>
               )
             )}
+            {timingToggle}
             <span className="tile-link">
               <a
                 className="tile-time"
@@ -865,21 +893,6 @@ export function Player({
           </>
         )}
         <div className="tile-actions">
-          <button
-            ref={timingButton}
-            className="icon-btn"
-            aria-label={`Timing for ${vod.channel}`}
-            aria-expanded={timing}
-            title={
-              busy && !timing
-                ? 'Wait for the recordings being added'
-                : 'Timing: jump everyone to a timestamp, or adjust this offset'
-            }
-            disabled={busy && !timing}
-            onClick={() => (timing ? closeTiming() : setTiming(true))}
-          >
-            <Timer size={15} />
-          </button>
           {!external && (
             <>
               <button

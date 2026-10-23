@@ -41,6 +41,7 @@
   --fast: 120ms;
   --base: 240ms;
   --tile-head: 44px;
+  --focus-tint: rgba(255, 255, 255, 0.08);
   font: 400 14px/20px var(--sans);
   color: var(--ink);
   background: var(--surface);
@@ -88,9 +89,21 @@ a {
 a:hover {
   color: var(--accent-hover);
 }
+/* Focus tints the background a little instead of drawing a ring or border, and selected text
+   isn't highlighted: the owner's choice. An inset shadow survives the background shorthands.
+   Text fields tint whenever they're active; other controls only for keyboard focus. */
+:focus,
 :focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
+  outline: none;
+}
+:focus-visible,
+input:not([type='range']):focus,
+textarea:focus,
+select:focus {
+  box-shadow: inset 0 0 0 100vmax var(--focus-tint);
+}
+::selection {
+  background-color: transparent;
 }
 .mono,
 code {
@@ -557,7 +570,10 @@ code {
   border-radius: 4px;
 }
 .add-field:focus-within {
-  border-color: var(--accent);
+  box-shadow: inset 0 0 0 100vmax var(--focus-tint);
+}
+.add-field textarea:focus {
+  box-shadow: none;
 }
 .add-field textarea {
   flex: 1;
@@ -789,7 +805,7 @@ button.tile-status:hover {
   display: flex;
   align-items: center;
 }
-.tile-actions .icon-btn[aria-expanded='true'] {
+.timing-toggle[aria-expanded='true'] {
   background: var(--surface-sunken);
   color: var(--ink);
 }
@@ -809,7 +825,7 @@ button.tile-status:hover {
   bottom: 3px;
   height: 2px;
   border-radius: 1px;
-  background: var(--accent);
+  background: var(--ink);
   transform: scaleX(0);
   transform-origin: left;
 }
@@ -823,8 +839,10 @@ button.tile-status:hover {
   }
 }
 
-/* Timing replaces the status and links, opening leftward from its button. Narrow headers
-   shed the name and source name, the labels, the readout, the other buttons and Reset. */
+/* Timing sits left of the time. Opening it turns the time into the jump field in place and
+   opens the offset controls leftward. Narrow headers shed the name, the source name and Offset
+   label and the readout. Reset goes before the buttons on the right, since hiding those moves
+   the time; once they're gone Reset fits again until the narrowest headers. */
 .tile-head {
   container: tile-head / inline-size;
 }
@@ -837,12 +855,18 @@ button.tile-status:hover {
   flex: 0 1 auto;
   min-width: 0;
   flex-wrap: nowrap;
-  gap: 10px;
+  gap: 8px;
   margin-left: auto;
-  /* Room for focus rings; scrolls only when even the compact form can't fit. */
-  padding: 4px;
+  /* Scrolls only when even the compact form can't fit; it opens scrolled to the jump field. */
   overflow-x: auto;
   scrollbar-width: none;
+}
+.tile-head .timing-adjust {
+  flex: 0 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
   animation: timing-open var(--base) ease-out;
 }
 @keyframes timing-open {
@@ -861,8 +885,13 @@ button.tile-status:hover {
 .tile-head .timing .offset-field {
   width: 68px;
 }
-.tile-head .timing .step-btn,
-.tile-head .timing .icon-btn {
+/* Sized like the time link and copy button it replaces, so the time stays put. */
+.tile-head .timing-jump .field {
+  width: 87px;
+  padding: 0 5px;
+}
+.tile-head .timing-group .step-btn,
+.tile-head .timing-group .icon-btn {
   width: 28px;
   height: 28px;
 }
@@ -873,14 +902,16 @@ button.tile-status:hover {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-@container tile-head (max-width: 720px) {
-  .timing-vs,
+@container tile-head (max-width: 680px) {
   .is-timing .tile-name,
   .is-timing .platform-mark {
     display: none;
   }
 }
-@container tile-head (max-width: 560px) {
+@container tile-head (max-width: 610px) {
+  .timing-vs {
+    display: none;
+  }
   .timing-label {
     position: absolute;
     width: 1px;
@@ -890,13 +921,18 @@ button.tile-status:hover {
     white-space: nowrap;
   }
 }
-@container tile-head (max-width: 520px) {
+@container tile-head (max-width: 570px) {
   .timing-drift:not(.has-error) {
     display: none;
   }
 }
-@container tile-head (max-width: 500px) {
-  .is-timing .tile-actions > :not(:first-child) {
+@container tile-head (min-width: 451px) and (max-width: 480px) {
+  .timing-reset {
+    display: none;
+  }
+}
+@container tile-head (max-width: 450px) {
+  .is-timing .tile-actions {
     display: none;
   }
 }
@@ -1386,8 +1422,7 @@ button.tile-status:hover {
   right: calc(var(--tl-meta) + var(--tl-gap));
 }
 .tl-overlay:has(.tl-seeker:focus-visible) {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
+  box-shadow: inset 0 0 0 100vmax var(--focus-tint);
   border-radius: 2px;
 }
 .tl-seeker {
@@ -1411,6 +1446,10 @@ button.tile-status:hover {
 }
 .tl-clip:hover {
   background: var(--accent);
+}
+/* The diamond keeps its own shadow ring, so focus dims it rather than tinting it. */
+.tl-clip:focus-visible {
+  background: var(--ink-muted);
 }
 
 /* Watch mode: players own the window, the bar stays below them. */
@@ -1462,16 +1501,21 @@ button.tile-status:hover {
   width: 22px;
   height: 22px;
 }
+/* Matches watch mode's smaller time link and copy button, so the time still stays put. */
 .watch-mode .tile-head .timing {
-  padding: 2px 4px;
+  gap: 6px;
+}
+.watch-mode .tile-head .timing-jump .field {
+  width: 80px;
+  font-size: 12px;
 }
 .watch-mode .tile-head .timing .field,
-.watch-mode .tile-head .timing .step-btn,
-.watch-mode .tile-head .timing .icon-btn {
+.watch-mode .tile-head .timing-group .step-btn,
+.watch-mode .tile-head .timing-group .icon-btn {
   height: 24px;
 }
-.watch-mode .tile-head .timing .step-btn,
-.watch-mode .tile-head .timing .icon-btn {
+.watch-mode .tile-head .timing-group .step-btn,
+.watch-mode .tile-head .timing-group .icon-btn {
   width: 24px;
 }
 .watch-mode .tile-frame {
@@ -1520,7 +1564,10 @@ button.tile-status:hover {
   border-radius: 4px;
 }
 .start-form:focus-within {
-  border-color: var(--accent);
+  box-shadow: inset 0 0 0 100vmax var(--focus-tint);
+}
+.start-form textarea:focus {
+  box-shadow: none;
 }
 .start-form textarea {
   display: block;
@@ -1766,9 +1813,9 @@ button.tile-status:hover {
     width: 30px;
   }
   /* 16 px text keeps iOS from zooming into the fields. */
-  .tile-head .timing {
+  .tile-head .timing,
+  .tile-head .timing-adjust {
     gap: 6px;
-    padding: 4px 2px;
   }
   .tile-head .timing-group {
     gap: 2px;
@@ -1782,8 +1829,12 @@ button.tile-status:hover {
   .tile-head .timing .offset-field {
     width: 72px;
   }
-  .tile-head .timing .step-btn,
-  .tile-head .timing .icon-btn {
+  .watch-mode .tile-head .timing-jump .field {
+    width: 86px;
+    font-size: 16px;
+  }
+  .tile-head .timing-group .step-btn,
+  .tile-head .timing-group .icon-btn {
     width: 30px;
     height: 36px;
   }

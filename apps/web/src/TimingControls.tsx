@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { ArrowRight, Minus, Plus, RotateCcw } from 'lucide-react';
 import { formatTime, matchMoment, parseTime, type Vod } from '@vodsync/core';
 import { DRIFT_LIMIT } from './syncSummary';
@@ -10,14 +10,16 @@ const signed = (seconds: number) =>
 const parseOffset = (text: string) =>
   Number(text.replace(/−/g, '-').replace(/[^\d.+-]/g, '') || NaN);
 
-// Timing opens inside the player's header, left of its button: Twitch pauses an embed that
-// anything covers. Fixed offsets apply after the stepper settles, so a run of nudges lines up once.
+// Timing opens inside the player's header (Twitch pauses an embed that anything covers): the
+// time becomes the jump field in place, and the offset controls open left of the toggle.
+// Fixed offsets apply after the stepper settles, so a run of nudges lines up once.
 export function TimingControls({
   vod,
   moment,
   drift,
   source,
   sourceName,
+  toggle,
   onSeek,
   onCorrect,
   onDone,
@@ -27,10 +29,13 @@ export function TimingControls({
   drift: number | null;
   source: boolean;
   sourceName: string;
+  // The header's Timing button, kept between the offset controls and the jump field.
+  toggle: ReactNode;
   onSeek: (offsetSeconds: number, correctionSeconds?: number) => void;
   onCorrect: (seconds: number) => void;
   onDone: () => void;
 }) {
+  const root = useRef<HTMLDivElement>(null);
   const jump = useRef<HTMLInputElement>(null);
   const [time, setTime] = useState(() => {
     const match = matchMoment(vod, moment);
@@ -54,6 +59,8 @@ export function TimingControls({
   useEffect(() => {
     jump.current?.focus({ preventScroll: true });
     jump.current?.select();
+    // A header too narrow for everything scrolls; start at the jump field.
+    if (root.current) root.current.scrollLeft = root.current.scrollWidth;
     // Closing timing applies a nudge that hasn't settled yet.
     return () => flush();
   }, []);
@@ -82,6 +89,7 @@ export function TimingControls({
         : `${formatDelta(drift)} vs ${sourceName}`;
   return (
     <div
+      ref={root}
       className="timing"
       role="group"
       aria-label={`${vod.channel} timing`}
@@ -96,8 +104,79 @@ export function TimingControls({
         }
       }}
     >
+      <div className="timing-adjust">
+        {/* Narrow headers drop the source name, then the readout unless it holds an error. */}
+        <span
+          className={`timing-drift ${error ? 'has-error' : drift !== null && Math.abs(drift) > DRIFT_LIMIT ? 'drifted' : drift !== null ? 'aligned' : ''}`}
+          title={driftText}
+        >
+          {error ? (
+            <span className="signal" role="alert">
+              {error}
+            </span>
+          ) : source ? (
+            'Source clock'
+          ) : drift === null ? (
+            'Not verified'
+          ) : (
+            <>
+              <span className="mono">{formatDelta(drift)}</span>
+              <span className="timing-vs"> vs {sourceName}</span>
+            </>
+          )}
+        </span>
+        <div className="timing-group" role="group" aria-labelledby={`offset-${vod.id}`}>
+          <span
+            id={`offset-${vod.id}`}
+            className="timing-label"
+            title="Positive starts this recording later. Shift steps 1 s; [ and ] nudge."
+          >
+            Offset
+          </span>
+          <button
+            className="step-btn"
+            aria-label="Offset minus 0.1 seconds"
+            title="−0.1 s (Shift: −1 s)"
+            onClick={(event) => step(-1, event.shiftKey)}
+          >
+            <Minus size={13} />
+          </button>
+          <input
+            className="field mono center offset-field"
+            aria-label="Offset in seconds"
+            value={offsetText}
+            inputMode="decimal"
+            onChange={(event) => setOffsetText(event.target.value)}
+            onBlur={() => apply(parseOffset(offsetText), true)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault();
+                apply(parseOffset(offsetText), true);
+              }
+            }}
+          />
+          <button
+            className="step-btn"
+            aria-label="Offset plus 0.1 seconds"
+            title="+0.1 s (Shift: +1 s)"
+            onClick={(event) => step(1, event.shiftKey)}
+          >
+            <Plus size={13} />
+          </button>
+          <button
+            className="icon-btn timing-reset"
+            aria-label="Reset offset to 0"
+            title="Reset to 0"
+            disabled={offset === 0}
+            onClick={() => apply(0, true)}
+          >
+            <RotateCcw size={14} />
+          </button>
+        </div>
+      </div>
+      {toggle}
       <form
-        className="timing-group"
+        className="timing-group timing-jump"
         onSubmit={(event) => {
           event.preventDefault();
           try {
@@ -114,7 +193,7 @@ export function TimingControls({
           }
         }}
       >
-        <label className="timing-label" htmlFor={`jump-${vod.id}`}>
+        <label className="sr-only" htmlFor={`jump-${vod.id}`}>
           Jump to
         </label>
         <input
@@ -124,6 +203,7 @@ export function TimingControls({
           value={time}
           onChange={(event) => setTime(event.target.value)}
           placeholder="1:02:10"
+          title="Jump everyone to this time in the VOD"
           autoComplete="off"
           spellCheck={false}
         />
@@ -136,74 +216,6 @@ export function TimingControls({
           <ArrowRight size={15} />
         </button>
       </form>
-      <div className="timing-group" role="group" aria-labelledby={`offset-${vod.id}`}>
-        <span
-          id={`offset-${vod.id}`}
-          className="timing-label"
-          title="Positive starts this recording later. Shift steps 1 s; [ and ] nudge."
-        >
-          Offset
-        </span>
-        <button
-          className="step-btn"
-          aria-label="Offset minus 0.1 seconds"
-          title="−0.1 s (Shift: −1 s)"
-          onClick={(event) => step(-1, event.shiftKey)}
-        >
-          <Minus size={13} />
-        </button>
-        <input
-          className="field mono center offset-field"
-          aria-label="Offset in seconds"
-          value={offsetText}
-          inputMode="decimal"
-          onChange={(event) => setOffsetText(event.target.value)}
-          onBlur={() => apply(parseOffset(offsetText), true)}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter') {
-              event.preventDefault();
-              apply(parseOffset(offsetText), true);
-            }
-          }}
-        />
-        <button
-          className="step-btn"
-          aria-label="Offset plus 0.1 seconds"
-          title="+0.1 s (Shift: +1 s)"
-          onClick={(event) => step(1, event.shiftKey)}
-        >
-          <Plus size={13} />
-        </button>
-        <button
-          className="icon-btn timing-reset"
-          aria-label="Reset offset to 0"
-          title="Reset to 0"
-          disabled={offset === 0}
-          onClick={() => apply(0, true)}
-        >
-          <RotateCcw size={14} />
-        </button>
-      </div>
-      {/* Narrow headers drop the source name, then the readout unless it holds an error. */}
-      <span
-        className={`timing-drift ${error ? 'has-error' : drift !== null && Math.abs(drift) > DRIFT_LIMIT ? 'drifted' : drift !== null ? 'aligned' : ''}`}
-        title={driftText}
-      >
-        {error ? (
-          <span className="signal" role="alert">
-            {error}
-          </span>
-        ) : source ? (
-          'Source clock'
-        ) : drift === null ? (
-          'Not verified'
-        ) : (
-          <>
-            <span className="mono">{formatDelta(drift)}</span>
-            <span className="timing-vs"> vs {sourceName}</span>
-          </>
-        )}
-      </span>
     </div>
   );
 }
